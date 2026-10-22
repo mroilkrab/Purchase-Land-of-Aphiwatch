@@ -1,0 +1,6 @@
+{
+  "name": "ระบบจัดการและวิเคราะห์การซื้อขายที่ดิน (Land Portfolio & KPI Dashboard)",
+  "description": "ระบบบริหารจัดการข้อมูลการซื้อ-ขายที่ดิน วิเคราะห์ KPI ประมาณการราคาต้นทุนและกำไร ซิงค์ Google Sheets อัพโหลดรูปโฉนด และสำรองข้อมูล Hybrid Cloud",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Search, 
   Filter, 
@@ -12,33 +12,104 @@ import {
   Eye, 
   Image as ImageIcon,
   Copy,
-  FileSpreadsheet
+  FileSpreadsheet,
+  X,
+  RotateCcw,
+  SlidersHorizontal,
+  ArrowUpDown,
+  Coins,
+  Layers,
+  Sparkles,
+  RefreshCw,
+  CheckCircle2,
+  Cloud,
+  Table as TableIcon,
+  LayoutGrid,
+  ArrowRightLeft,
+  Calendar,
+  Building,
+  Tag,
+  Clock,
+  AlertTriangle
 } from 'lucide-react';
 import { LandPlot, LandStatus } from '../types/land';
-import { formatCurrency, formatThaiArea } from '../services/storage';
+import { formatCurrency, formatThaiArea, calculatePlotHoldingInfo } from '../services/storage';
 
 interface LandTableProps {
   plots: LandPlot[];
+  initialSearchTerm?: string;
+  initialStatusFilter?: string;
   onSelectPlot: (plot: LandPlot) => void;
   onEditPlot: (plot: LandPlot) => void;
   onDeletePlot: (plotId: string) => void;
   onDuplicatePlot: (plot: LandPlot) => void;
   onAddNewPlot: () => void;
   onExportCsv: () => void;
+  isSyncingSheet?: boolean;
+  sheetSyncStatus?: {
+    status: 'idle' | 'syncing' | 'success' | 'error';
+    message: string;
+    sheetUrl?: string;
+    lastSynced?: string;
+  };
+  onSyncSheet?: () => void;
+  googleSheetId?: string;
+  isGoogleAuthed?: boolean;
+  onLoginGoogle?: () => void;
 }
+
+type PriceRangePreset = 'all' | 'under_100k' | '100k_500k' | '500k_1m' | '1m_5m' | 'over_5m' | 'custom';
+type SortOption = 'order_asc' | 'order_desc' | 'cost_desc' | 'cost_asc' | 'area_desc' | 'area_asc' | 'target_desc';
 
 export const LandTable: React.FC<LandTableProps> = ({
   plots,
+  initialSearchTerm,
+  initialStatusFilter,
   onSelectPlot,
   onEditPlot,
   onDeletePlot,
   onDuplicatePlot,
   onAddNewPlot,
   onExportCsv,
+  isSyncingSheet = false,
+  sheetSyncStatus,
+  onSyncSheet,
+  googleSheetId,
+  isGoogleAuthed = false,
+  onLoginGoogle,
 }) => {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
+  // View mode: 'table' (full spreadsheet) or 'cards' (responsive grid fitting every screen)
+  const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
+
+  // State for in-app delete confirmation modal
+  const [plotToDelete, setPlotToDelete] = useState<LandPlot | null>(null);
+
+  // Search & Filters State
+  const [searchTerm, setSearchTerm] = useState(initialSearchTerm || '');
+  const [statusFilter, setStatusFilter] = useState<string>(initialStatusFilter || 'all');
+  const [holdingAlertFilter, setHoldingAlertFilter] = useState<'all' | 'exceeded_12' | 'exceeded_24'>('all');
   const [provinceFilter, setProvinceFilter] = useState<string>('all');
+  const [districtFilter, setDistrictFilter] = useState<string>('all');
+  const [landTypeFilter, setLandTypeFilter] = useState<string>('all');
+  const [pricePreset, setPricePreset] = useState<PriceRangePreset>('all');
+  const [minPrice, setMinPrice] = useState<string>('');
+  const [maxPrice, setMaxPrice] = useState<string>('');
+  const [sortBy, setSortBy] = useState<SortOption>('order_asc');
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState<boolean>(false);
+
+  // Synchronize incoming search query or status filter from parent (e.g. from Dashboard alerts)
+  useEffect(() => {
+    if (initialSearchTerm !== undefined) {
+      setSearchTerm(initialSearchTerm);
+    }
+  }, [initialSearchTerm]);
+
+  useEffect(() => {
+    if (initialStatusFilter !== undefined) {
+      setStatusFilter(initialStatusFilter);
+    }
+  }, [initialStatusFilter]);
+
   const [expandedPlots, setExpandedPlots] = useState<Record<string, boolean>>({
     'plot-1': true,
     'plot-10': true,
@@ -49,369 +120,1306 @@ export const LandTable: React.FC<LandTableProps> = ({
     setExpandedPlots((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
-  const provinces = Array.from(new Set(plots.map((p) => p.province).filter(Boolean)));
+  // Distinct Provinces
+  const provinces = useMemo(() => {
+    return Array.from(new Set(plots.map((p) => p.province).filter(Boolean))).sort();
+  }, [plots]);
 
-  const filteredPlots = plots.filter((plot) => {
-    const matchesSearch =
-      plot.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      plot.subdistrict.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      plot.district.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      plot.province.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      plot.primaryDeedNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (plot.subParcels && plot.subParcels.some((sp) => sp.deedNumber.toLowerCase().includes(searchTerm.toLowerCase())));
+  // Distinct Districts (filtered by selected province if any)
+  const districts = useMemo(() => {
+    const list = plots
+      .filter((p) => provinceFilter === 'all' || p.province === provinceFilter)
+      .map((p) => p.district)
+      .filter(Boolean);
+    return Array.from(new Set(list)).sort();
+  }, [plots, provinceFilter]);
 
-    const matchesStatus = statusFilter === 'all' || plot.status === statusFilter;
-    const matchesProvince = provinceFilter === 'all' || plot.province === provinceFilter;
+  // Distinct Land Types
+  const landTypes = useMemo(() => {
+    return Array.from(new Set(plots.map((p) => p.landType).filter(Boolean))).sort();
+  }, [plots]);
 
-    return matchesSearch && matchesStatus && matchesProvince;
-  });
+  // Counts by Status
+  const statusCounts = useMemo(() => {
+    return {
+      all: plots.length,
+      holding: plots.filter((p) => p.status === 'holding').length,
+      for_sale: plots.filter((p) => p.status === 'for_sale').length,
+      consignment: plots.filter((p) => p.status === 'consignment').length,
+      sold: plots.filter((p) => p.status === 'sold').length,
+    };
+  }, [plots]);
 
-  // Calculate totals for filtered items
-  const totalCostFiltered = filteredPlots.reduce((acc, p) => acc + (p.totalCost || 0), 0);
-  const totalPurchaseFiltered = filteredPlots.reduce((acc, p) => acc + (p.purchasePrice || 0), 0);
-  const totalTaxFiltered = filteredPlots.reduce((acc, p) => acc + (p.taxAndFees || 0), 0);
-  const totalSurveyFiltered = filteredPlots.reduce((acc, p) => acc + (p.surveyCost || 0), 0);
-  const totalOtherFiltered = filteredPlots.reduce((acc, p) => acc + (p.otherExpenses || 0), 0);
-  const totalTargetSaleFiltered = filteredPlots.reduce((acc, p) => acc + (p.targetSalePrice || 0), 0);
-  const totalSqWahFiltered = filteredPlots.reduce((acc, p) => acc + (p.totalSqWah || 0), 0);
+  // Holding Period Overdue Counts (Unsold plots exceeding 12 or 24 months)
+  const overdueCounts = useMemo(() => {
+    let exceeded_12 = 0;
+    let exceeded_24 = 0;
+    plots.forEach((p) => {
+      if (p.status !== 'sold') {
+        const info = calculatePlotHoldingInfo(p.purchaseDate);
+        if (info.isValid) {
+          if (info.monthsHeld >= 12) exceeded_12++;
+          if (info.monthsHeld >= 24) exceeded_24++;
+        }
+      }
+    });
+    return { exceeded_12, exceeded_24 };
+  }, [plots]);
+
+  // Top Location Tags (Top 7 provinces and districts)
+  const topLocationTags = useMemo(() => {
+    const tagsMap: Record<string, { type: 'province' | 'district'; name: string; count: number }> = {};
+    plots.forEach((p) => {
+      if (p.province && p.province.trim()) {
+        const key = `prov:${p.province.trim()}`;
+        if (!tagsMap[key]) tagsMap[key] = { type: 'province', name: p.province.trim(), count: 0 };
+        tagsMap[key].count++;
+      }
+      if (p.district && p.district.trim()) {
+        const key = `dist:${p.district.trim()}`;
+        if (!tagsMap[key]) tagsMap[key] = { type: 'district', name: p.district.trim(), count: 0 };
+        tagsMap[key].count++;
+      }
+    });
+    return Object.values(tagsMap).sort((a, b) => b.count - a.count).slice(0, 7);
+  }, [plots]);
+
+  // Check how many filters are active
+  const activeFiltersCount = useMemo(() => {
+    let count = 0;
+    if (searchTerm.trim() !== '') count++;
+    if (statusFilter !== 'all') count++;
+    if (holdingAlertFilter !== 'all') count++;
+    if (provinceFilter !== 'all') count++;
+    if (districtFilter !== 'all') count++;
+    if (landTypeFilter !== 'all') count++;
+    if (pricePreset !== 'all') count++;
+    if (minPrice !== '' || maxPrice !== '') count++;
+    return count;
+  }, [searchTerm, statusFilter, holdingAlertFilter, provinceFilter, districtFilter, landTypeFilter, pricePreset, minPrice, maxPrice]);
+
+  // Reset all filters
+  const handleResetFilters = () => {
+    setSearchTerm('');
+    setStatusFilter('all');
+    setHoldingAlertFilter('all');
+    setProvinceFilter('all');
+    setDistrictFilter('all');
+    setLandTypeFilter('all');
+    setPricePreset('all');
+    setMinPrice('');
+    setMaxPrice('');
+    setSortBy('order_asc');
+  };
+
+  // Filter and sort plots
+  const filteredPlots = useMemo(() => {
+    return plots
+      .filter((plot) => {
+        // 1. Text Search Filter (Case insensitive across all relevant fields)
+        if (searchTerm.trim() !== '') {
+          const query = searchTerm.toLowerCase().trim();
+          const matchesTitle = plot.title?.toLowerCase().includes(query);
+          const matchesDeed = plot.primaryDeedNumber?.toLowerCase().includes(query);
+          const matchesProvince = plot.province?.toLowerCase().includes(query);
+          const matchesDistrict = plot.district?.toLowerCase().includes(query);
+          const matchesSubdistrict = plot.subdistrict?.toLowerCase().includes(query);
+          const matchesNotes = plot.notes?.toLowerCase().includes(query);
+          const matchesLandType = plot.landType?.toLowerCase().includes(query);
+          const matchesOrder = String(plot.orderNumber) === query;
+          const matchesSubDeed = plot.subParcels?.some((sp) =>
+            sp.deedNumber?.toLowerCase().includes(query) || sp.notes?.toLowerCase().includes(query)
+          );
+
+          if (!matchesTitle && !matchesDeed && !matchesProvince && !matchesDistrict && !matchesSubdistrict && !matchesNotes && !matchesLandType && !matchesOrder && !matchesSubDeed) {
+            return false;
+          }
+        }
+
+        // 2. Status Filter
+        if (statusFilter !== 'all' && plot.status !== statusFilter) {
+          return false;
+        }
+
+        // 3. Province Filter
+        if (provinceFilter !== 'all' && plot.province !== provinceFilter) {
+          return false;
+        }
+
+        // 4. District Filter
+        if (districtFilter !== 'all' && plot.district !== districtFilter) {
+          return false;
+        }
+
+        // 5. Land Type Filter
+        if (landTypeFilter !== 'all' && plot.landType !== landTypeFilter) {
+          return false;
+        }
+
+        // 6. Price Range Preset Filter (Based on totalCost)
+        const cost = plot.totalCost || 0;
+        if (pricePreset === 'under_100k' && cost >= 100000) return false;
+        if (pricePreset === '100k_500k' && (cost < 100000 || cost > 500000)) return false;
+        if (pricePreset === '500k_1m' && (cost < 500000 || cost > 1000000)) return false;
+        if (pricePreset === '1m_5m' && (cost < 1000000 || cost > 5000000)) return false;
+        if (pricePreset === 'over_5m' && cost <= 5000000) return false;
+
+        // Custom Price Range Filter
+        if (pricePreset === 'custom') {
+          if (minPrice !== '' && !isNaN(Number(minPrice)) && cost < Number(minPrice)) {
+            return false;
+          }
+          if (maxPrice !== '' && !isNaN(Number(maxPrice)) && cost > Number(maxPrice)) {
+            return false;
+          }
+        }
+
+        // 7. Holding Period Alert Tag Filter
+        if (holdingAlertFilter === 'exceeded_12') {
+          if (plot.status === 'sold') return false;
+          const info = calculatePlotHoldingInfo(plot.purchaseDate);
+          if (!info.isValid || info.monthsHeld < 12) return false;
+        }
+        if (holdingAlertFilter === 'exceeded_24') {
+          if (plot.status === 'sold') return false;
+          const info = calculatePlotHoldingInfo(plot.purchaseDate);
+          if (!info.isValid || info.monthsHeld < 24) return false;
+        }
+
+        return true;
+      })
+      .sort((a, b) => {
+        // Sorting logic
+        switch (sortBy) {
+          case 'order_asc':
+            return (a.orderNumber || 0) - (b.orderNumber || 0);
+          case 'order_desc':
+            return (b.orderNumber || 0) - (a.orderNumber || 0);
+          case 'cost_desc':
+            return (b.totalCost || 0) - (a.totalCost || 0);
+          case 'cost_asc':
+            return (a.totalCost || 0) - (b.totalCost || 0);
+          case 'area_desc':
+            return (b.totalSqWah || 0) - (a.totalSqWah || 0);
+          case 'area_asc':
+            return (a.totalSqWah || 0) - (b.totalSqWah || 0);
+          case 'target_desc':
+            return (b.targetSalePrice || 0) - (a.targetSalePrice || 0);
+          default:
+            return 0;
+        }
+      });
+  }, [plots, searchTerm, statusFilter, holdingAlertFilter, provinceFilter, districtFilter, landTypeFilter, pricePreset, minPrice, maxPrice, sortBy]);
+
+  // Aggregate stats for filtered plots
+  const totalCostFiltered = useMemo(() => filteredPlots.reduce((sum, p) => sum + (p.totalCost || 0), 0), [filteredPlots]);
+  const totalPurchaseFiltered = useMemo(() => filteredPlots.reduce((sum, p) => sum + (p.purchasePrice || 0), 0), [filteredPlots]);
+  const totalTaxFiltered = useMemo(() => filteredPlots.reduce((sum, p) => sum + (p.taxAndFees || 0), 0), [filteredPlots]);
+  const totalSurveyFiltered = useMemo(() => filteredPlots.reduce((sum, p) => sum + (p.surveyCost || 0), 0), [filteredPlots]);
+  const totalOtherFiltered = useMemo(() => filteredPlots.reduce((sum, p) => sum + (p.otherExpenses || 0), 0), [filteredPlots]);
+  const totalTargetSaleFiltered = useMemo(() => filteredPlots.reduce((sum, p) => sum + (p.targetSalePrice || 0), 0), [filteredPlots]);
+  const totalSqWahFiltered = useMemo(() => filteredPlots.reduce((sum, p) => sum + (p.totalSqWah || 0), 0), [filteredPlots]);
 
   return (
-    <div className="space-y-4">
-      {/* Controls Bar: Search, Filters, Export, Add */}
-      <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 p-4 bg-slate-900/90 rounded-xl border border-slate-800">
-        <div className="flex flex-1 items-center gap-2">
-          <div className="relative flex-1 max-w-md">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              type="text"
-              placeholder="ค้นหาชื่อแปลง, เลขที่โฉนด, ตำบล, อำเภอ..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-9 pr-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-xs sm:text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-emerald-500 transition-colors"
-            />
+    <div className="space-y-4 max-w-full">
+      {/* Google Sheets Auto-Sync Notification Bar */}
+      <div className="p-3 sm:p-4 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-900 to-emerald-950/40 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-lg">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
+            <FileSpreadsheet className="w-5 h-5" />
           </div>
-
-          {/* Status Filter */}
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-emerald-500 cursor-pointer"
-          >
-            <option value="all">ทุกสถานะ</option>
-            <option value="holding">ถือครอง</option>
-            <option value="for_sale">กำลังประกาศขาย</option>
-            <option value="sold">ขายแล้ว</option>
-            <option value="consignment">รับขายฝาก</option>
-          </select>
-
-          {/* Province Filter */}
-          <select
-            value={provinceFilter}
-            onChange={(e) => setProvinceFilter(e.target.value)}
-            className="px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-emerald-500 cursor-pointer"
-          >
-            <option value="all">ทุกจังหวัด</option>
-            {provinces.map((prov) => (
-              <option key={prov} value={prov}>
-                {prov}
-              </option>
-            ))}
-          </select>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs sm:text-sm font-bold text-white">ระบบอัปเดต Google Sheet อัตโนมัติ</span>
+              {isSyncingSheet ? (
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                  <RefreshCw className="w-2.5 h-2.5 animate-spin" /> กำลังซิงค์...
+                </span>
+              ) : isGoogleAuthed ? (
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                  <CheckCircle2 className="w-2.5 h-2.5" /> ซิงค์อัตโนมัติเปิดใช้งาน
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-medium bg-slate-800 text-slate-400 border border-slate-700">
+                  รอเชื่อมต่อ Google
+                </span>
+              )}
+            </div>
+            <p className="text-[11px] sm:text-xs text-slate-400 mt-0.5 truncate">
+              {isGoogleAuthed 
+                ? (sheetSyncStatus?.message || 'ทุกการ เพิ่มแปลงใหม่, แก้ไขข้อมูล หรือ ลบแปลงที่ดิน จะถูกอัปเดตเข้า Google Sheet ให้ทันที')
+                : 'เข้าสู่ระบบ Google เพื่อเปิดใช้งานระบบอัปเดต Google Sheet อัตโนมัติทุกครั้งที่มีการเพิ่ม แก้ไข หรือลบข้อมูล'}
+            </p>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            onClick={onExportCsv}
-            className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium border border-slate-700 transition-colors cursor-pointer"
-            title="ดาวน์โหลดไฟล์ CSV สำหรับเปิดใน Excel หรือ Numbers"
-          >
-            <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
-            <span className="hidden sm:inline">ส่งออก CSV</span>
-          </button>
-
-          <button
-            onClick={onAddNewPlot}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold shadow-md shadow-emerald-600/30 transition-all cursor-pointer active:scale-95"
-          >
-            <Plus className="w-4 h-4" />
-            เพิ่มแปลงที่ดิน
-          </button>
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          {sheetSyncStatus?.sheetUrl && (
+            <a
+              href={sheetSyncStatus.sheetUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-400 hover:text-emerald-300 text-xs font-semibold border border-slate-700 transition-colors cursor-pointer"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span>เปิด Google Sheet</span>
+            </a>
+          )}
+          {isGoogleAuthed && onSyncSheet && (
+            <button
+              onClick={onSyncSheet}
+              disabled={isSyncingSheet}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 text-xs font-semibold border border-emerald-500/30 transition-colors cursor-pointer disabled:opacity-50 shadow-sm"
+              title="กดเพื่อส่งข้อมูลทั้งหมดเข้า Google Sheet ทันที"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isSyncingSheet ? 'animate-spin' : ''}`} />
+              <span>{isSyncingSheet ? 'กำลังซิงค์...' : 'ซิงค์ Google Sheet ตอนนี้'}</span>
+            </button>
+          )}
+          {!isGoogleAuthed && onLoginGoogle && (
+            <button
+              onClick={onLoginGoogle}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-md transition-colors cursor-pointer"
+            >
+              <span>เข้าสู่ระบบ Google</span>
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Main Table Container */}
-      <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/80 shadow-lg">
-        <table className="w-full text-left text-xs border-collapse min-w-[1300px]">
-          <thead>
-            <tr className="bg-slate-800/80 border-b border-slate-700 text-slate-300 font-semibold sticky top-0 z-10">
-              <th className="py-3 px-3 w-12 text-center">ลำดับ</th>
-              <th className="py-3 px-3 w-24">วันที่ซื้อ</th>
-              <th className="py-3 px-3 w-24">วันที่ขาย</th>
-              <th className="py-3 px-4 min-w-[200px]">รายละเอียดที่ดิน / ประเภท</th>
-              <th className="py-3 px-3">ตำบล/อำเภอ/จังหวัด</th>
-              <th className="py-3 px-3">เลขที่ดิน</th>
-              <th className="py-3 px-3 text-center">พิกัด Maps</th>
-              <th className="py-3 px-3 text-right">เนื้อที่ (ไร่-งาน-วา)</th>
-              <th className="py-3 px-3 text-right">รวม ตร.ว.</th>
-              <th className="py-3 px-3 text-right">ราคาซื้อ</th>
-              <th className="py-3 px-3 text-right">ภาษี/รังวัด/อื่นๆ</th>
-              <th className="py-3 px-3 text-right font-bold text-white bg-slate-800">ต้นทุนรวมทั้งสิ้น</th>
-              <th className="py-3 px-3 text-right text-emerald-400">ราคาตั้งใจขาย (KPI)</th>
-              <th className="py-3 px-3 text-center">สถานะ</th>
-              <th className="py-3 px-3 text-center w-28">จัดการ</th>
-            </tr>
-          </thead>
+      {/* Primary Toolbar: Search Bar, View Mode Switcher, Quick Filters, Export, Add */}
+      <div className="p-3.5 sm:p-4 bg-slate-900 rounded-2xl border border-slate-800 space-y-3 shadow-xl">
+        <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
+          {/* Enhanced Search Input */}
+          <div className="relative flex-1 min-w-0 max-w-xl">
+            <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              placeholder="ค้นหาชื่อแปลง, เลขโฉนด, ตำบล, อำเภอ, จังหวัด..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-9 py-2 bg-slate-800/90 border border-slate-700/80 rounded-xl text-xs sm:text-sm text-slate-100 placeholder:text-slate-400 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all"
+            />
+            {searchTerm && (
+              <button
+                onClick={() => setSearchTerm('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-200 rounded-full hover:bg-slate-700 cursor-pointer"
+                title="ล้างข้อความค้นหา"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
 
-          <tbody className="divide-y divide-slate-800/80">
-            {filteredPlots.length === 0 ? (
-              <tr>
-                <td colSpan={15} className="py-12 text-center text-slate-400">
-                  ไม่พบข้อมูลแปลงที่ดินที่ตรงกับเงื่อนไขการค้นหา
-                </td>
-              </tr>
-            ) : (
-              filteredPlots.map((plot) => {
+          {/* Action Row: Dual View Toggle (Table / Cards), Filters, Export, Add */}
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            {/* View Mode Toggle */}
+            <div className="inline-flex items-center bg-slate-800/90 p-0.5 rounded-xl border border-slate-700 shrink-0 shadow-inner">
+              <button
+                type="button"
+                onClick={() => setViewMode('table')}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                  viewMode === 'table'
+                    ? 'bg-emerald-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+                title="ตารางบัญชีแบบละเอียด (Financial Ledger)"
+              >
+                <TableIcon className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">ตารางบัญชี</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('cards')}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                  viewMode === 'cards'
+                    ? 'bg-emerald-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+                title="มุมมองการ์ดสรุปแปลงที่ดิน (พอดีหน้าจอ ไม่ล้น)"
+              >
+                <LayoutGrid className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">การ์ดสรุป</span>
+              </button>
+            </div>
+
+            <button
+              onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
+                showAdvancedFilters || activeFiltersCount > 0
+                  ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                  : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
+              }`}
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">ตัวกรอง</span>
+              {activeFiltersCount > 0 && (
+                <span className="w-4 h-4 rounded-full bg-emerald-500 text-slate-950 text-[10px] font-bold flex items-center justify-center">
+                  {activeFiltersCount}
+                </span>
+              )}
+            </button>
+
+            <button
+              onClick={onExportCsv}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-medium border border-slate-700 transition-colors cursor-pointer"
+              title="ดาวน์โหลดไฟล์ CSV"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="hidden md:inline">CSV</span>
+            </button>
+
+            <button
+              onClick={onAddNewPlot}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold shadow-md shadow-emerald-600/30 transition-all cursor-pointer active:scale-95"
+            >
+              <Plus className="w-4 h-4" />
+              <span className="hidden sm:inline">เพิ่มแปลงที่ดิน</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Real-Time Interactive Tag Chips Bar (Quick Filters for Status, Alert, & Locations) */}
+        <div className="pt-2.5 border-t border-slate-800/80 space-y-2">
+          {/* Status & Alert Chips */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-[11px] font-semibold text-slate-400 flex items-center gap-1 mr-1">
+              <Tag className="w-3.5 h-3.5 text-emerald-400" /> แท็กด่วน:
+            </span>
+
+            {[
+              { id: 'all', label: 'ทั้งหมด', count: statusCounts.all },
+              { id: 'holding', label: '🟢 ถือครอง', count: statusCounts.holding },
+              { id: 'for_sale', label: '🔵 ประกาศขาย', count: statusCounts.for_sale },
+              { id: 'consignment', label: '🟠 ขายฝาก', count: statusCounts.consignment },
+              { id: 'sold', label: '🔴 ขายแล้ว', count: statusCounts.sold },
+            ].map((st) => {
+              const isActive = statusFilter === st.id && holdingAlertFilter === 'all';
+              return (
+                <button
+                  key={st.id}
+                  type="button"
+                  onClick={() => {
+                    setStatusFilter(st.id);
+                    setHoldingAlertFilter('all');
+                  }}
+                  className={`px-2.5 py-1 rounded-xl text-xs font-medium transition-all flex items-center gap-1.5 cursor-pointer ${
+                    isActive
+                      ? 'bg-emerald-600 text-white font-bold shadow-md shadow-emerald-950/40 ring-1 ring-emerald-400'
+                      : 'bg-slate-800/70 text-slate-300 hover:bg-slate-800 border border-slate-700/60'
+                  }`}
+                >
+                  <span>{st.label}</span>
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                    isActive ? 'bg-emerald-700 text-white' : 'bg-slate-900/80 text-slate-400'
+                  }`}>
+                    {st.count}
+                  </span>
+                </button>
+              );
+            })}
+
+            {/* Holding Alert Chips: > 12 Months and > 24 Months */}
+            {overdueCounts.exceeded_12 > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (holdingAlertFilter === 'exceeded_12') {
+                    setHoldingAlertFilter('all');
+                  } else {
+                    setHoldingAlertFilter('exceeded_12');
+                    setStatusFilter('all');
+                  }
+                }}
+                className={`px-2.5 py-1 rounded-xl text-xs font-medium transition-all flex items-center gap-1.5 cursor-pointer border ${
+                  holdingAlertFilter === 'exceeded_12'
+                    ? 'bg-amber-500 text-slate-950 font-bold border-amber-400 shadow-md shadow-amber-950/40 ring-1 ring-amber-300'
+                    : 'bg-amber-500/10 text-amber-300 border-amber-500/30 hover:bg-amber-500/20'
+                }`}
+                title="กรองเฉพาะแปลงที่ถือครองเกิน 1 ปี โดยยังไม่ได้ขาย"
+              >
+                <Clock className="w-3.5 h-3.5" />
+                <span>ถือครอง &gt; 1 ปี</span>
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-900/80 font-mono font-bold">
+                  {overdueCounts.exceeded_12}
+                </span>
+              </button>
+            )}
+
+            {overdueCounts.exceeded_24 > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (holdingAlertFilter === 'exceeded_24') {
+                    setHoldingAlertFilter('all');
+                  } else {
+                    setHoldingAlertFilter('exceeded_24');
+                    setStatusFilter('all');
+                  }
+                }}
+                className={`px-2.5 py-1 rounded-xl text-xs font-medium transition-all flex items-center gap-1.5 cursor-pointer border ${
+                  holdingAlertFilter === 'exceeded_24'
+                    ? 'bg-rose-500 text-white font-bold border-rose-400 shadow-md shadow-rose-950/40 ring-1 ring-rose-300'
+                    : 'bg-rose-500/10 text-rose-300 border-rose-500/30 hover:bg-rose-500/20'
+                }`}
+                title="กรองเฉพาะแปลงที่ถือครองเกิน 2 ปี โดยยังไม่ได้ขาย"
+              >
+                <AlertTriangle className="w-3.5 h-3.5" />
+                <span>ถือครอง &gt; 2 ปี</span>
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-900/80 font-mono font-bold">
+                  {overdueCounts.exceeded_24}
+                </span>
+              </button>
+            )}
+          </div>
+
+          {/* Location Tags Row (Provinces and Districts) */}
+          <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+            <span className="text-[11px] font-semibold text-slate-400 flex items-center gap-1 mr-1">
+              <MapPin className="w-3.5 h-3.5 text-cyan-400" /> ทำเล:
+            </span>
+            {topLocationTags.map((loc) => {
+              const isSelected = loc.type === 'province' ? provinceFilter === loc.name : districtFilter === loc.name;
+              return (
+                <button
+                  key={`${loc.type}-${loc.name}`}
+                  type="button"
+                  onClick={() => {
+                    if (loc.type === 'province') {
+                      setProvinceFilter(provinceFilter === loc.name ? 'all' : loc.name);
+                      setDistrictFilter('all');
+                    } else {
+                      setDistrictFilter(districtFilter === loc.name ? 'all' : loc.name);
+                    }
+                  }}
+                  className={`px-2.5 py-0.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1 cursor-pointer border ${
+                    isSelected
+                      ? 'bg-cyan-500/20 text-cyan-200 border-cyan-400 font-bold shadow-sm ring-1 ring-cyan-400/50'
+                      : 'bg-slate-800/60 text-slate-300 border-slate-700/60 hover:bg-slate-800 hover:text-white'
+                  }`}
+                >
+                  <span>{loc.name}</span>
+                  <span className="text-[10px] text-slate-400 font-mono">({loc.count})</span>
+                </button>
+              );
+            })}
+
+            {/* Quick Reset All Filters Button */}
+            {activeFiltersCount > 0 && (
+              <button
+                type="button"
+                onClick={handleResetFilters}
+                className="px-2.5 py-0.5 rounded-lg text-xs font-semibold text-rose-300 hover:text-white bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 flex items-center gap-1 transition-all cursor-pointer ml-auto"
+              >
+                <RotateCcw className="w-3 h-3" /> ล้างตัวกรอง ({activeFiltersCount})
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Filter Dropdowns Grid (Status, Location, Price Range, Land Type, Sort) */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 pt-2 border-t border-slate-800/80">
+          {/* 1. Status Dropdown */}
+          <div className="min-w-0">
+            <label className="block text-[11px] text-slate-400 font-medium mb-1">
+              สถานะแปลง:
+            </label>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="w-full px-2 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-emerald-500 cursor-pointer truncate"
+            >
+              <option value="all">ทุกสถานะ (All)</option>
+              <option value="holding">🟢 ถือครอง (Holding)</option>
+              <option value="for_sale">🔵 กำลังประกาศขาย</option>
+              <option value="consignment">🟠 รับขายฝาก</option>
+              <option value="sold">🔴 ขายแล้ว (Sold)</option>
+            </select>
+          </div>
+
+          {/* 2. Location - Province Dropdown */}
+          <div className="min-w-0">
+            <label className="block text-[11px] text-slate-400 font-medium mb-1">
+              ทำเล: จังหวัด
+            </label>
+            <select
+              value={provinceFilter}
+              onChange={(e) => {
+                setProvinceFilter(e.target.value);
+                setDistrictFilter('all');
+              }}
+              className="w-full px-2 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-emerald-500 cursor-pointer truncate"
+            >
+              <option value="all">ทุกจังหวัด</option>
+              {provinces.map((prov) => (
+                <option key={prov} value={prov}>
+                  {prov}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* 3. Location - District Dropdown */}
+          <div className="min-w-0">
+            <label className="block text-[11px] text-slate-400 font-medium mb-1">
+              ทำเล: อำเภอ/เขต
+            </label>
+            <select
+              value={districtFilter}
+              onChange={(e) => setDistrictFilter(e.target.value)}
+              className="w-full px-2 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-emerald-500 cursor-pointer truncate"
+            >
+              <option value="all">ทุกอำเภอ/เขต</option>
+              {districts.map((dist) => (
+                <option key={dist} value={dist}>
+                  {dist}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* 4. Price Range Dropdown */}
+          <div className="min-w-0">
+            <label className="block text-[11px] text-slate-400 font-medium mb-1">
+              ช่วงราคาต้นทุน:
+            </label>
+            <select
+              value={pricePreset}
+              onChange={(e) => setPricePreset(e.target.value as PriceRangePreset)}
+              className="w-full px-2 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-emerald-500 cursor-pointer truncate"
+            >
+              <option value="all">ทุกช่วงราคา (All)</option>
+              <option value="under_100k">&lt; 100K บาท</option>
+              <option value="100k_500k">100K - 500K บาท</option>
+              <option value="500k_1m">500K - 1M บาท</option>
+              <option value="1m_5m">1M - 5M บาท</option>
+              <option value="over_5m">&gt; 5,000,000 บาท</option>
+              <option value="custom">ระบุเอง...</option>
+            </select>
+          </div>
+
+          {/* 5. Land Type Dropdown */}
+          <div className="min-w-0">
+            <label className="block text-[11px] text-slate-400 font-medium mb-1">
+              ประเภทที่ดิน:
+            </label>
+            <select
+              value={landTypeFilter}
+              onChange={(e) => setLandTypeFilter(e.target.value)}
+              className="w-full px-2 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-emerald-500 cursor-pointer truncate"
+            >
+              <option value="all">ทุกประเภท (All)</option>
+              {landTypes.map((type) => (
+                <option key={type} value={type}>
+                  {type}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* 6. Sorting Dropdown */}
+          <div className="min-w-0">
+            <label className="block text-[11px] text-slate-400 font-medium mb-1">
+              เรียงลำดับ:
+            </label>
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as SortOption)}
+              className="w-full px-2 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-emerald-500 cursor-pointer truncate"
+            >
+              <option value="order_asc">ลำดับแปลง (1 - 10)</option>
+              <option value="order_desc">ลำดับแปลง (ล่าสุด)</option>
+              <option value="cost_desc">ต้นทุนรวม (มากไปน้อย)</option>
+              <option value="cost_asc">ต้นทุนรวม (น้อยไปมาก)</option>
+              <option value="area_desc">ขนาดเนื้อที่ (ใหญ่สุด)</option>
+              <option value="area_asc">ขนาดเนื้อที่ (เล็กสุด)</option>
+              <option value="target_desc">ราคาตั้งใจขาย (มากสุด)</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Custom Price Inputs (if chosen) */}
+        {pricePreset === 'custom' && (
+          <div className="flex flex-wrap items-center gap-3 pt-2 p-3 bg-slate-800/60 rounded-xl border border-slate-700">
+            <span className="text-xs text-slate-300 font-medium">ช่วงราคาต้นทุนที่กำหนดเอง:</span>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                placeholder="ต่ำสุด (บาท)"
+                value={minPrice}
+                onChange={(e) => setMinPrice(e.target.value)}
+                className="w-32 px-2.5 py-1 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-100 font-mono"
+              />
+              <span className="text-slate-500">-</span>
+              <input
+                type="number"
+                placeholder="สูงสุด (บาท)"
+                value={maxPrice}
+                onChange={(e) => setMaxPrice(e.target.value)}
+                className="w-32 px-2.5 py-1 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-100 font-mono"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Filter Summary & Active Badges Bar */}
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80 text-xs">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-slate-400">
+              ผลการค้นหา: <strong className="text-emerald-400 font-mono">{filteredPlots.length}</strong> จาก {plots.length} แปลง
+            </span>
+            <span className="text-slate-600 hidden sm:inline">|</span>
+            <span className="text-slate-400">
+              เนื้อที่รวม: <strong className="text-amber-400 font-mono">{(totalSqWahFiltered / 400).toFixed(2)} ไร่</strong> ({totalSqWahFiltered.toLocaleString('th-TH')} ตร.ว.)
+            </span>
+            <span className="text-slate-600 hidden sm:inline">|</span>
+            <span className="text-slate-400">
+              ต้นทุนรวม: <strong className="text-white font-mono">{formatCurrency(totalCostFiltered)}</strong>
+            </span>
+          </div>
+
+          {activeFiltersCount > 0 && (
+            <button
+              onClick={handleResetFilters}
+              className="inline-flex items-center gap-1 text-[11px] text-rose-400 hover:text-rose-300 font-medium cursor-pointer transition-colors"
+            >
+              <RotateCcw className="w-3 h-3" /> ล้างตัวกรอง ({activeFiltersCount})
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* VIEW MODE 1: RESPONSIVE CARDS GRID (100% Fit & No Overflow) */}
+      {viewMode === 'cards' && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between px-1 text-xs text-slate-400">
+            <span>มุมมองการ์ดสรุปแปลงที่ดิน (แสดงผลพอดีหน้าจอ เหมาะกับมือถือและแท็บเล็ต)</span>
+            <button
+              onClick={() => setViewMode('table')}
+              className="text-emerald-400 hover:underline flex items-center gap-1 cursor-pointer"
+            >
+              <TableIcon className="w-3.5 h-3.5" /> สลับเป็นตารางบัญชี
+            </button>
+          </div>
+
+          {filteredPlots.length === 0 ? (
+            <div className="py-16 text-center text-slate-400 space-y-2 bg-slate-900/60 rounded-2xl border border-slate-800">
+              <div className="text-slate-400 font-medium text-sm">ไม่พบแปลงที่ดินตามเงื่อนไขที่เลือก</div>
+              <button
+                onClick={handleResetFilters}
+                className="mt-2 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-400 text-xs font-semibold cursor-pointer border border-slate-700 inline-flex items-center gap-1"
+              >
+                <RotateCcw className="w-3.5 h-3.5" /> ล้างตัวกรอง
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 min-w-0">
+              {filteredPlots.map((plot) => {
                 const hasSubParcels = plot.subParcels && plot.subParcels.length > 0;
                 const isExpanded = expandedPlots[plot.id];
                 const otherCosts = (plot.taxAndFees || 0) + (plot.surveyCost || 0) + (plot.otherExpenses || 0);
+                const projectedProfit = (plot.targetSalePrice || 0) - (plot.totalCost || 0);
 
                 return (
-                  <React.Fragment key={plot.id}>
-                    {/* Parent Row */}
-                    <tr
-                      onClick={() => onSelectPlot(plot)}
-                      className="hover:bg-slate-800/60 transition-colors cursor-pointer group"
-                    >
-                      <td className="py-3 px-3 text-center font-mono text-slate-400">
-                        {hasSubParcels ? (
-                          <button
-                            onClick={(e) => toggleExpand(plot.id, e)}
-                            className="p-1 hover:text-emerald-400 rounded transition-colors inline-flex items-center justify-center cursor-pointer"
-                            title="แสดง/ซ่อน โฉนดย่อย"
-                          >
-                            {isExpanded ? (
-                              <ChevronDown className="w-3.5 h-3.5 text-emerald-400" />
-                            ) : (
-                              <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-                            )}
-                          </button>
-                        ) : (
-                          plot.orderNumber
-                        )}
-                      </td>
-                      <td className="py-3 px-3 text-slate-300 font-mono">{plot.purchaseDate || '-'}</td>
-                      <td className="py-3 px-3 text-slate-400 font-mono">
-                        {plot.saleDate ? (
-                          <span className="text-rose-400 font-medium">{plot.saleDate}</span>
-                        ) : (
-                          '-'
-                        )}
-                      </td>
-                      <td className="py-3 px-4">
-                        <div className="font-semibold text-slate-100 flex items-center gap-1.5">
-                          {plot.title}
-                          {plot.images && plot.images.length > 0 && (
-                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[10px] bg-slate-800 text-teal-400 border border-teal-500/30">
-                              <ImageIcon className="w-2.5 h-2.5" /> {plot.images.length}
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-[11px] text-slate-400">
-                          ประเภท: <span className="text-slate-300">{plot.landType}</span>
-                          {plot.notes && (
-                            <span className="text-slate-500 ml-1 truncate max-w-[200px] inline-block align-bottom">
-                              • {plot.notes}
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="py-3 px-3 text-slate-300">
-                        <div>{plot.subdistrict}, {plot.district}</div>
-                        <div className="text-[11px] text-slate-400">{plot.province}</div>
-                      </td>
-                      <td className="py-3 px-3 font-mono text-slate-200">
-                        {plot.primaryDeedNumber || '-'}
+                  <div
+                    key={plot.id}
+                    onClick={() => onSelectPlot(plot)}
+                    className="p-4 sm:p-5 rounded-2xl bg-slate-900 border border-slate-800 hover:border-emerald-500/40 hover:shadow-xl hover:shadow-emerald-950/20 transition-all cursor-pointer flex flex-col justify-between space-y-4 group relative min-w-0"
+                  >
+                    {/* Top Row: Order Badge, Status, Land Type */}
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="w-7 h-7 rounded-lg bg-slate-800 text-emerald-400 font-mono font-bold text-xs flex items-center justify-center border border-slate-700">
+                          #{plot.orderNumber}
+                        </span>
+                        <span className="px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-800 text-slate-300 border border-slate-700">
+                          {plot.landType}
+                        </span>
+                      </div>
+
+                      <span
+                        className={`px-2.5 py-0.5 rounded-full text-[11px] font-semibold shrink-0 ${
+                          plot.status === 'sold'
+                            ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                            : plot.status === 'consignment'
+                            ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                            : plot.status === 'for_sale'
+                            ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20'
+                            : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                        }`}
+                      >
+                        {plot.status === 'sold'
+                          ? 'ขายแล้ว'
+                          : plot.status === 'consignment'
+                          ? 'รับขายฝาก'
+                          : plot.status === 'for_sale'
+                          ? 'กำลังประกาศขาย'
+                          : 'ถือครอง'}
+                      </span>
+                    </div>
+
+                    {/* Title & Deed Info */}
+                    <div>
+                      <h4 className="font-bold text-slate-100 text-base group-hover:text-emerald-400 transition-colors line-clamp-2">
+                        {plot.title}
+                      </h4>
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-xs text-slate-400">
+                        <span className="font-mono">
+                          โฉนด: <strong className="text-slate-200">{plot.primaryDeedNumber || '-'}</strong>
+                        </span>
                         {hasSubParcels && (
-                          <span className="ml-1 text-[10px] text-emerald-400">
-                            (+{plot.subParcels?.length} โฉนด)
+                          <span className="text-[11px] font-medium text-emerald-400">
+                            (+{plot.subParcels?.length} โฉนดย่อย)
                           </span>
                         )}
-                      </td>
-                      <td className="py-3 px-3 text-center" onClick={(e) => e.stopPropagation()}>
-                        {plot.mapsUrl ? (
-                          <a
-                            href={plot.mapsUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-blue-400 text-[11px] border border-slate-700 transition-colors"
-                            title="เปิด Google Maps ดูตำแหน่งจริง"
-                          >
-                            <MapPin className="w-3 h-3 text-rose-400" />
-                            แผนที่
-                          </a>
-                        ) : (
-                          <span className="text-slate-600">-</span>
+                        {plot.purchaseDate && (
+                          <span className="text-slate-400 font-mono text-[11px] flex items-center gap-1">
+                            <Calendar className="w-3 h-3 text-slate-500" />
+                            ซื้อ: {plot.purchaseDate}
+                          </span>
                         )}
-                      </td>
-                      <td className="py-3 px-3 text-right font-mono text-slate-200">
-                        {formatThaiArea(plot.rai, plot.ngan, plot.sqWah)}
-                      </td>
-                      <td className="py-3 px-3 text-right font-mono text-slate-300">
-                        {plot.totalSqWah.toLocaleString('th-TH')}
-                      </td>
-                      <td className="py-3 px-3 text-right font-mono text-slate-200">
-                        {formatCurrency(plot.purchasePrice)}
-                      </td>
-                      <td className="py-3 px-3 text-right font-mono text-slate-400">
-                        {otherCosts > 0 ? formatCurrency(otherCosts) : '-'}
-                      </td>
-                      <td className="py-3 px-3 text-right font-mono font-bold text-white bg-slate-800/40">
-                        {formatCurrency(plot.totalCost)}
-                      </td>
-                      <td className="py-3 px-3 text-right font-mono font-semibold text-emerald-400">
-                        {plot.targetSalePrice > 0 ? formatCurrency(plot.targetSalePrice) : '-'}
-                      </td>
-                      <td className="py-3 px-3 text-center">
-                        <span
-                          className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-semibold ${
-                            plot.status === 'sold'
-                              ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-                              : plot.status === 'consignment'
-                              ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                              : plot.status === 'for_sale'
-                              ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20'
-                              : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                          }`}
-                        >
-                          {plot.status === 'sold'
-                            ? 'ขายแล้ว'
-                            : plot.status === 'consignment'
-                            ? 'ขายฝาก'
-                            : plot.status === 'for_sale'
-                            ? 'กำลังขาย'
-                            : 'ถือครอง'}
-                        </span>
-                      </td>
-                      <td className="py-3 px-3 text-center" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center justify-center gap-1">
-                          <button
-                            onClick={() => onSelectPlot(plot)}
-                            title="ดูรายละเอียดและรูปภาพ"
-                            className="p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded transition-colors cursor-pointer"
-                          >
-                            <Eye className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => onEditPlot(plot)}
-                            title="แก้ไขข้อมูล"
-                            className="p-1.5 text-slate-400 hover:text-blue-400 hover:bg-slate-800 rounded transition-colors cursor-pointer"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => onDuplicatePlot(plot)}
-                            title="ทำซ้ำแปลงนี้"
-                            className="p-1.5 text-slate-400 hover:text-purple-400 hover:bg-slate-800 rounded transition-colors cursor-pointer"
-                          >
-                            <Copy className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => {
-                              if (window.confirm(`ต้องการลบแปลง #${plot.orderNumber} "${plot.title}" หรือไม่?`)) {
-                                onDeletePlot(plot.id);
-                              }
-                            }}
-                            title="ลบแปลงที่ดิน"
-                            className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded transition-colors cursor-pointer"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
+                      </div>
+                    </div>
 
-                    {/* Sub-parcels Nested Rows (if expanded) */}
-                    {hasSubParcels && isExpanded && (
-                      plot.subParcels!.map((sp, idx) => (
-                        <tr
-                          key={sp.id}
-                          className="bg-slate-950/60 text-slate-400 border-l-2 border-emerald-500/50"
+                    {/* Location & Map button */}
+                    <div className="flex items-center justify-between text-xs p-2.5 rounded-xl bg-slate-950/60 border border-slate-800/80">
+                      <div className="flex items-center gap-1.5 text-slate-300 min-w-0 truncate">
+                        <MapPin className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                        <span className="truncate">{plot.subdistrict}, {plot.district}, {plot.province}</span>
+                      </div>
+                      {plot.mapsUrl && (
+                        <a
+                          href={plot.mapsUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="px-2 py-1 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 text-[11px] font-semibold border border-blue-500/30 flex items-center gap-1 transition-colors shrink-0"
                         >
-                          <td className="py-2 px-3 text-center text-[10px] font-mono text-slate-500">
-                            └ {plot.orderNumber}.{idx + 1}
-                          </td>
-                          <td className="py-2 px-3"></td>
-                          <td className="py-2 px-3"></td>
-                          <td className="py-2 px-4 pl-8 text-[11px] text-slate-300">
-                            โฉนดย่อย: {sp.notes || `แปลงย่อยที่ ${idx + 1}`}
-                          </td>
-                          <td className="py-2 px-3 text-[11px]">
-                            {plot.subdistrict}, {plot.district}
-                          </td>
-                          <td className="py-2 px-3 font-mono text-emerald-400 font-semibold">
-                            {sp.deedNumber}
-                          </td>
-                          <td className="py-2 px-3 text-center" onClick={(e) => e.stopPropagation()}>
-                            {sp.mapsUrl ? (
-                              <a
-                                href={sp.mapsUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1 text-[10px] text-blue-400 hover:underline"
+                          <ExternalLink className="w-3 h-3" />
+                          <span>Google Maps</span>
+                        </a>
+                      )}
+                    </div>
+
+                    {/* Land Area Spec */}
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div className="p-2.5 rounded-xl bg-slate-800/50 border border-slate-800">
+                        <span className="text-slate-400 block text-[11px]">ขนาดเนื้อที่</span>
+                        <span className="font-semibold text-slate-200 font-mono">
+                          {formatThaiArea(plot.rai, plot.ngan, plot.sqWah)}
+                        </span>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-slate-800/50 border border-slate-800">
+                        <span className="text-slate-400 block text-[11px]">รวมตารางวา</span>
+                        <span className="font-semibold text-amber-400 font-mono">
+                          {plot.totalSqWah.toLocaleString('th-TH')} ตร.ว.
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Financial Summary Highlight Box */}
+                    <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 space-y-1.5 text-xs">
+                      <div className="flex justify-between items-baseline">
+                        <span className="text-slate-400">ต้นทุนรวมทั้งสิ้น:</span>
+                        <span className="font-bold font-mono text-white text-sm">
+                          {formatCurrency(plot.totalCost)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-baseline text-[11px]">
+                        <span className="text-slate-500">ราคาซื้อเดิม:</span>
+                        <span className="font-mono text-slate-300">{formatCurrency(plot.purchasePrice)}</span>
+                      </div>
+                      {otherCosts > 0 && (
+                        <div className="flex justify-between items-baseline text-[11px]">
+                          <span className="text-slate-500">ภาษี/รังวัด/อื่นๆ:</span>
+                          <span className="font-mono text-slate-400">+{formatCurrency(otherCosts)}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between items-baseline pt-1.5 border-t border-slate-800">
+                        <span className="text-emerald-400 font-semibold">ราคาตั้งใจขาย (KPI):</span>
+                        <span className="font-bold font-mono text-emerald-400">
+                          {plot.targetSalePrice > 0 ? formatCurrency(plot.targetSalePrice) : '-'}
+                        </span>
+                      </div>
+                      {projectedProfit > 0 && (
+                        <div className="flex justify-between items-baseline text-[10px] text-slate-400">
+                          <span>กำไรคาดหวัง:</span>
+                          <span className="text-emerald-400 font-mono font-semibold">
+                            +{formatCurrency(projectedProfit)} ({((projectedProfit / (plot.totalCost || 1)) * 100).toFixed(1)}%)
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Sub-parcels Quick View (if subdivided) */}
+                    {hasSubParcels && (
+                      <div className="text-[11px] pt-1 border-t border-slate-800/80" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          onClick={(e) => toggleExpand(plot.id, e)}
+                          className="w-full flex items-center justify-between text-slate-400 hover:text-emerald-400 transition-colors py-1 cursor-pointer"
+                        >
+                          <span className="flex items-center gap-1">
+                            <Layers className="w-3.5 h-3.5 text-emerald-400" />
+                            โฉนดย่อย ({plot.subParcels?.length} แปลง)
+                          </span>
+                          {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                        </button>
+                        {isExpanded && (
+                          <div className="space-y-1 mt-1 pl-2 border-l border-emerald-500/40">
+                            {plot.subParcels!.map((sp, idx) => (
+                              <div key={sp.id} className="flex justify-between items-center text-[10px] text-slate-400 py-0.5">
+                                <span>โฉนด {sp.deedNumber} ({formatThaiArea(sp.rai, sp.ngan, sp.sqWah)})</span>
+                                {sp.mapsUrl && (
+                                  <a href={sp.mapsUrl} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">
+                                    แผนที่
+                                  </a>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Card Actions Footer */}
+                    <div 
+                      className="pt-2 border-t border-slate-800 flex items-center justify-between gap-1 text-xs" 
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <button
+                        onClick={() => onSelectPlot(plot)}
+                        className="flex-1 py-1.5 px-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium flex items-center justify-center gap-1 transition-colors cursor-pointer text-[11px]"
+                      >
+                        <Eye className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>ดูละเอียด</span>
+                      </button>
+
+                      <button
+                        onClick={() => onEditPlot(plot)}
+                        className="py-1.5 px-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-blue-400 hover:text-blue-300 transition-colors cursor-pointer"
+                        title="แก้ไขข้อมูลแปลงนี้"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                      </button>
+
+                      <button
+                        onClick={() => onDuplicatePlot(plot)}
+                        className="py-1.5 px-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-purple-400 hover:text-purple-300 transition-colors cursor-pointer"
+                        title="คัดลอก/ทำซ้ำแปลงนี้"
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                      </button>
+
+                      <button
+                        onClick={() => setPlotToDelete(plot)}
+                        className="py-1.5 px-2.5 rounded-lg bg-slate-800 hover:bg-rose-950/40 text-rose-400 hover:text-rose-300 transition-colors cursor-pointer"
+                        title="ลบแปลงนี้"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* VIEW MODE 2: FULL FINANCIAL LEDGER TABLE */}
+      {viewMode === 'table' && (
+        <div className="space-y-2">
+          {/* Subtle horizontal scroll helper banner */}
+          <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-slate-400">
+            <div className="flex items-center gap-1.5">
+              <ArrowRightLeft className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <span>เลื่อนแนวนอน ↔ เพื่อดูคอลัมน์การเงินทั้งหมด (ปุ่ม &quot;จัดการ&quot; จะตรึงอยู่ด้านขวาสุดเสมอ)</span>
+            </div>
+            <button
+              onClick={() => setViewMode('cards')}
+              className="text-emerald-400 hover:text-emerald-300 hover:underline inline-flex items-center gap-1 cursor-pointer"
+            >
+              <span>สลับเป็นมุมมองการ์ด (พอดีหน้าจอ)</span>
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          {/* Main Table Container */}
+          <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/80 shadow-lg relative max-w-full">
+            <table className="w-full text-left text-xs border-collapse min-w-[1300px]">
+              <thead>
+                <tr className="bg-slate-800/90 border-b border-slate-700 text-slate-300 font-semibold sticky top-0 z-20">
+                  <th className="py-3 px-3 w-12 text-center">ลำดับ</th>
+                  <th className="py-3 px-3 w-24">วันที่ซื้อ</th>
+                  <th className="py-3 px-3 w-24">วันที่ขาย</th>
+                  <th className="py-3 px-4 min-w-[200px]">รายละเอียดที่ดิน / ประเภท</th>
+                  <th className="py-3 px-3">ตำบล/อำเภอ/จังหวัด</th>
+                  <th className="py-3 px-3">เลขที่ดิน</th>
+                  <th className="py-3 px-3 text-center">พิกัด Maps</th>
+                  <th className="py-3 px-3 text-right">เนื้อที่ (ไร่-งาน-วา)</th>
+                  <th className="py-3 px-3 text-right">รวม ตร.ว.</th>
+                  <th className="py-3 px-3 text-right">ราคาซื้อ</th>
+                  <th className="py-3 px-3 text-right">ภาษี/รังวัด/อื่นๆ</th>
+                  <th className="py-3 px-3 text-right font-bold text-white bg-slate-800">ต้นทุนรวมทั้งสิ้น</th>
+                  <th className="py-3 px-3 text-right text-emerald-400">ราคาตั้งใจขาย (KPI)</th>
+                  <th className="py-3 px-3 text-center">สถานะ</th>
+                  {/* Sticky Action Column so actions are always reachable */}
+                  <th className="py-3 px-3 text-center w-28 sticky right-0 bg-slate-800 border-l border-slate-700 shadow-[-4px_0_8px_rgba(0,0,0,0.3)] z-30">
+                    จัดการ
+                  </th>
+                </tr>
+              </thead>
+
+              <tbody className="divide-y divide-slate-800/80">
+                {filteredPlots.length === 0 ? (
+                  <tr>
+                    <td colSpan={15} className="py-16 text-center text-slate-400 space-y-2">
+                      <div className="text-slate-500 font-medium text-sm">
+                        ไม่พบข้อมูลแปลงที่ดินที่ตรงกับเงื่อนไขการค้นหา
+                      </div>
+                      <p className="text-xs text-slate-500">
+                        ลองเปลี่ยนคำค้นหา ปรับช่วงราคา หรือกด &quot;ล้างตัวกรองทั้งหมด&quot;
+                      </p>
+                      <button
+                        onClick={handleResetFilters}
+                        className="mt-2 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-400 text-xs font-semibold cursor-pointer border border-slate-700 inline-flex items-center gap-1"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" /> ล้างตัวกรองทั้งหมด
+                      </button>
+                    </td>
+                  </tr>
+                ) : (
+                  filteredPlots.map((plot) => {
+                    const hasSubParcels = plot.subParcels && plot.subParcels.length > 0;
+                    const isExpanded = expandedPlots[plot.id];
+                    const otherCosts = (plot.taxAndFees || 0) + (plot.surveyCost || 0) + (plot.otherExpenses || 0);
+
+                    return (
+                      <React.Fragment key={plot.id}>
+                        {/* Parent Row */}
+                        <tr
+                          onClick={() => onSelectPlot(plot)}
+                          className="hover:bg-slate-800/60 transition-colors cursor-pointer group"
+                        >
+                          <td className="py-3 px-3 text-center font-mono text-slate-400">
+                            {hasSubParcels ? (
+                              <button
+                                onClick={(e) => toggleExpand(plot.id, e)}
+                                className="p-1 hover:text-emerald-400 rounded transition-colors inline-flex items-center justify-center cursor-pointer"
+                                title="แสดง/ซ่อน โฉนดย่อย"
                               >
-                                <ExternalLink className="w-2.5 h-2.5" /> แผนที่
-                              </a>
+                                {isExpanded ? (
+                                  <ChevronDown className="w-3.5 h-3.5 text-emerald-400" />
+                                ) : (
+                                  <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                                )}
+                              </button>
+                            ) : (
+                              plot.orderNumber
+                            )}
+                          </td>
+                          <td className="py-3 px-3 text-slate-300 font-mono">{plot.purchaseDate || '-'}</td>
+                          <td className="py-3 px-3 text-slate-400 font-mono">
+                            {plot.saleDate ? (
+                              <span className="text-rose-400 font-medium">{plot.saleDate}</span>
                             ) : (
                               '-'
                             )}
                           </td>
-                          <td className="py-2 px-3 text-right font-mono text-slate-300 text-[11px]">
-                            {formatThaiArea(sp.rai, sp.ngan, sp.sqWah)}
+                          <td className="py-3 px-4">
+                            <div className="font-semibold text-slate-100 flex items-center gap-1.5">
+                              {plot.title}
+                              {plot.images && plot.images.length > 0 && (
+                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[10px] bg-slate-800 text-teal-400 border border-teal-500/30">
+                                  <ImageIcon className="w-2.5 h-2.5" /> {plot.images.length}
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[11px] text-slate-400">
+                              ประเภท: <span className="text-slate-300">{plot.landType}</span>
+                              {plot.notes && (
+                                <span className="text-slate-500 ml-1 truncate max-w-[200px] inline-block align-bottom">
+                                  • {plot.notes}
+                                </span>
+                              )}
+                            </div>
                           </td>
-                          <td className="py-2 px-3 text-right font-mono text-slate-400 text-[11px]">
-                            {sp.totalSqWah}
+                          <td className="py-3 px-3 text-slate-300">
+                            <div>{plot.subdistrict}, {plot.district}</div>
+                            <div className="text-[11px] text-slate-400">{plot.province}</div>
                           </td>
-                          <td colSpan={6} className="py-2 px-3 text-slate-600 text-[10px] italic">
-                            (นับรวมในแปลงแม่ #{plot.orderNumber})
+                          <td className="py-3 px-3 font-mono text-slate-200">
+                            {plot.primaryDeedNumber || '-'}
+                            {hasSubParcels && (
+                              <span className="ml-1 text-[10px] text-emerald-400">
+                                (+{plot.subParcels?.length} โฉนด)
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3 px-3 text-center" onClick={(e) => e.stopPropagation()}>
+                            {plot.mapsUrl ? (
+                              <a
+                                href={plot.mapsUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-blue-400 text-[11px] border border-slate-700 transition-colors"
+                                title="เปิด Google Maps ดูตำแหน่งจริง"
+                              >
+                                <MapPin className="w-3 h-3 text-rose-400" />
+                                แผนที่
+                              </a>
+                            ) : (
+                              <span className="text-slate-600">-</span>
+                            )}
+                          </td>
+                          <td className="py-3 px-3 text-right font-mono text-slate-200">
+                            {formatThaiArea(plot.rai, plot.ngan, plot.sqWah)}
+                          </td>
+                          <td className="py-3 px-3 text-right font-mono text-slate-300">
+                            {plot.totalSqWah.toLocaleString('th-TH')}
+                          </td>
+                          <td className="py-3 px-3 text-right font-mono text-slate-200">
+                            {formatCurrency(plot.purchasePrice)}
+                          </td>
+                          <td className="py-3 px-3 text-right font-mono text-slate-400">
+                            {otherCosts > 0 ? formatCurrency(otherCosts) : '-'}
+                          </td>
+                          <td className="py-3 px-3 text-right font-mono font-bold text-white bg-slate-800/40">
+                            {formatCurrency(plot.totalCost)}
+                          </td>
+                          <td className="py-3 px-3 text-right font-mono font-semibold text-emerald-400">
+                            {plot.targetSalePrice > 0 ? formatCurrency(plot.targetSalePrice) : '-'}
+                          </td>
+                          <td className="py-3 px-3 text-center">
+                            <span
+                              className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-semibold ${
+                                plot.status === 'sold'
+                                  ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                                  : plot.status === 'consignment'
+                                  ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                                  : plot.status === 'for_sale'
+                                  ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20'
+                                  : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                              }`}
+                            >
+                              {plot.status === 'sold'
+                                ? 'ขายแล้ว'
+                                : plot.status === 'consignment'
+                                ? 'ขายฝาก'
+                                : plot.status === 'for_sale'
+                                ? 'กำลังขาย'
+                                : 'ถือครอง'}
+                            </span>
+                          </td>
+                          {/* Sticky Action TD so user always has access to Edit / Delete / View */}
+                          <td className="py-3 px-3 text-center sticky right-0 bg-slate-900/95 backdrop-blur-sm border-l border-slate-800 shadow-[-4px_0_8px_rgba(0,0,0,0.3)] z-10" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex items-center justify-center gap-1">
+                              <button
+                                onClick={() => onSelectPlot(plot)}
+                                title="ดูรายละเอียดแปลงนี้"
+                                className="p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-colors cursor-pointer"
+                              >
+                                <Eye className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => onEditPlot(plot)}
+                                title="แก้ไขข้อมูลแปลงนี้"
+                                className="p-1.5 text-slate-400 hover:text-blue-400 hover:bg-blue-500/10 rounded-lg transition-colors cursor-pointer"
+                              >
+                                <Edit3 className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => onDuplicatePlot(plot)}
+                                title="ทำซ้ำแปลงนี้"
+                                className="p-1.5 text-slate-400 hover:text-purple-400 hover:bg-purple-500/10 rounded-lg transition-colors cursor-pointer"
+                              >
+                                <Copy className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => setPlotToDelete(plot)}
+                                title="ลบแปลงที่ดินนี้ (และอัปเดต Google Sheet)"
+                                className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
                           </td>
                         </tr>
-                      ))
-                    )}
-                  </React.Fragment>
-                );
-              })
-            )}
-          </tbody>
 
-          {/* Table Summary Footer (Grand Totals matching attachment) */}
-          <tfoot className="bg-slate-800/90 font-semibold text-slate-200 border-t-2 border-slate-700">
-            <tr>
-              <td colSpan={7} className="py-3 px-4 text-right uppercase tracking-wider text-xs">
-                รวมทั้งหมด ({filteredPlots.length} แปลง):
-              </td>
-              <td className="py-3 px-3 text-right font-mono text-slate-100">
-                {(totalSqWahFiltered / 400).toFixed(2)} ไร่
-              </td>
-              <td className="py-3 px-3 text-right font-mono text-amber-400">
-                {totalSqWahFiltered.toLocaleString('th-TH')}
-              </td>
-              <td className="py-3 px-3 text-right font-mono text-slate-100">
-                {formatCurrency(totalPurchaseFiltered)}
-              </td>
-              <td className="py-3 px-3 text-right font-mono text-slate-300">
-                {formatCurrency(totalTaxFiltered + totalSurveyFiltered + totalOtherFiltered)}
-              </td>
-              <td className="py-3 px-3 text-right font-mono text-emerald-400 text-sm font-bold bg-slate-800">
-                {formatCurrency(totalCostFiltered)}
-              </td>
-              <td className="py-3 px-3 text-right font-mono text-emerald-300">
-                {formatCurrency(totalTargetSaleFiltered)}
-              </td>
-              <td colSpan={2} className="py-3 px-3"></td>
-            </tr>
-          </tfoot>
-        </table>
-      </div>
+                        {/* Sub-parcels Nested Rows (if expanded) */}
+                        {hasSubParcels && isExpanded && (
+                          plot.subParcels!.map((sp, idx) => (
+                            <tr
+                              key={sp.id}
+                              className="bg-slate-950/60 text-slate-400 border-l-2 border-emerald-500/50"
+                            >
+                              <td className="py-2 px-3 text-center text-[10px] font-mono text-slate-500">
+                                └ {plot.orderNumber}.{idx + 1}
+                              </td>
+                              <td className="py-2 px-3"></td>
+                              <td className="py-2 px-3"></td>
+                              <td className="py-2 px-4 pl-8 text-[11px] text-slate-300">
+                                โฉนดย่อย: {sp.notes || `แปลงย่อยที่ ${idx + 1}`}
+                              </td>
+                              <td className="py-2 px-3 text-[11px]">
+                                {plot.subdistrict}, {plot.district}
+                              </td>
+                              <td className="py-2 px-3 font-mono text-emerald-400 font-semibold">
+                                {sp.deedNumber}
+                              </td>
+                              <td className="py-2 px-3 text-center" onClick={(e) => e.stopPropagation()}>
+                                {sp.mapsUrl ? (
+                                  <a
+                                    href={sp.mapsUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1 text-[10px] text-blue-400 hover:underline"
+                                  >
+                                    <ExternalLink className="w-2.5 h-2.5" /> แผนที่
+                                  </a>
+                                ) : (
+                                  '-'
+                                )}
+                              </td>
+                              <td className="py-2 px-3 text-right font-mono text-slate-300 text-[11px]">
+                                {formatThaiArea(sp.rai, sp.ngan, sp.sqWah)}
+                              </td>
+                              <td className="py-2 px-3 text-right font-mono text-slate-400 text-[11px]">
+                                {sp.totalSqWah}
+                              </td>
+                              <td colSpan={5} className="py-2 px-3 text-slate-600 text-[10px] italic">
+                                (นับรวมในแปลงแม่ #{plot.orderNumber})
+                              </td>
+                              <td className="py-2 px-3 text-center sticky right-0 bg-slate-950/95 backdrop-blur-sm border-l border-slate-800/80 shadow-[-4px_0_8px_rgba(0,0,0,0.3)] z-10">
+                                <span className="text-[10px] text-slate-600">-</span>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </React.Fragment>
+                    );
+                  })
+                )}
+              </tbody>
+
+              {/* Table Summary Footer */}
+              <tfoot className="bg-slate-800/90 font-semibold text-slate-200 border-t-2 border-slate-700">
+                <tr>
+                  <td colSpan={7} className="py-3 px-4 text-right uppercase tracking-wider text-xs">
+                    รวมทั้งหมดที่เลือก ({filteredPlots.length} แปลง):
+                  </td>
+                  <td className="py-3 px-3 text-right font-mono text-slate-100">
+                    {(totalSqWahFiltered / 400).toFixed(2)} ไร่
+                  </td>
+                  <td className="py-3 px-3 text-right font-mono text-amber-400">
+                    {totalSqWahFiltered.toLocaleString('th-TH')}
+                  </td>
+                  <td className="py-3 px-3 text-right font-mono text-slate-100">
+                    {formatCurrency(totalPurchaseFiltered)}
+                  </td>
+                  <td className="py-3 px-3 text-right font-mono text-slate-300">
+                    {formatCurrency(totalTaxFiltered + totalSurveyFiltered + totalOtherFiltered)}
+                  </td>
+                  <td className="py-3 px-3 text-right font-mono text-emerald-400 text-sm font-bold bg-slate-800">
+                    {formatCurrency(totalCostFiltered)}
+                  </td>
+                  <td className="py-3 px-3 text-right font-mono text-emerald-300">
+                    {formatCurrency(totalTargetSaleFiltered)}
+                  </td>
+                  <td className="py-3 px-3 text-center">
+                    <span className="text-[11px] text-slate-400">{filteredPlots.length} แปลง</span>
+                  </td>
+                  <td className="py-3 px-3 text-center sticky right-0 bg-slate-800 border-l border-slate-700 shadow-[-4px_0_8px_rgba(0,0,0,0.3)] z-20">
+                    <span className="text-[11px] text-emerald-400 font-mono">100%</span>
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* In-App Delete Confirmation Modal (Safe for iFrames & No browser popups) */}
+      {plotToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="p-3 rounded-xl bg-rose-500/10 text-rose-400 border border-rose-500/20 shrink-0">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-base font-bold text-white">
+                  ยืนยันการลบแปลงที่ดิน #{plotToDelete.orderNumber}
+                </h3>
+                <p className="text-xs text-slate-400">
+                  คุณแน่ใจหรือไม่ว่าต้องการลบข้อมูลแปลงนี้ออกจากระบบ?
+                </p>
+              </div>
+            </div>
+
+            {/* Plot Details Summary */}
+            <div className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 space-y-1.5 text-xs">
+              <div className="flex justify-between">
+                <span className="text-slate-400">ชื่อแปลง:</span>
+                <span className="font-semibold text-slate-100">{plotToDelete.title}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">ที่ตั้ง:</span>
+                <span className="text-slate-300">
+                  {plotToDelete.subdistrict}, {plotToDelete.district}, {plotToDelete.province}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">เลขโฉนด:</span>
+                <span className="font-mono text-emerald-400 font-semibold">{plotToDelete.primaryDeedNumber || '-'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">เนื้อที่:</span>
+                <span className="font-mono text-slate-200">
+                  {formatThaiArea(plotToDelete.rai, plotToDelete.ngan, plotToDelete.sqWah)} ({plotToDelete.totalSqWah} ตร.ว.)
+                </span>
+              </div>
+              <div className="flex justify-between border-t border-slate-800/80 pt-1.5 font-bold">
+                <span className="text-slate-300">ต้นทุนรวม:</span>
+                <span className="font-mono text-emerald-400">{formatCurrency(plotToDelete.totalCost)}</span>
+              </div>
+            </div>
+
+            {/* Google Sheets Sync Notice */}
+            <div className="p-2.5 rounded-xl bg-emerald-950/30 border border-emerald-800/40 text-[11px] text-emerald-300 flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>
+                {isGoogleAuthed 
+                  ? 'ระบบจะอัปเดตและลบรายการนี้ออกจาก Google Sheet ให้โดยอัตโนมัติ'
+                  : 'รายการนี้จะถูกลบออกจากฐานข้อมูลเครื่อง'}
+              </span>
+            </div>
+
+            {/* Actions */}
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setPlotToDelete(null)}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition-colors cursor-pointer"
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const id = plotToDelete.id;
+                  setPlotToDelete(null);
+                  onDeletePlot(id);
+                }}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold shadow-lg shadow-rose-600/30 flex items-center gap-1.5 transition-all cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                ยืนยันลบแปลงนี้
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

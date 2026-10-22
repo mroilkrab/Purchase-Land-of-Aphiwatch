@@ -6,6 +6,8 @@ export interface SubParcel {
   sqWah: number;
   totalSqWah: number;
   mapsUrl?: string;
+  latitude?: number;
+  longitude?: number;
   notes?: string;
 }
 
@@ -31,6 +33,8 @@ export interface LandPlot {
   province: string; // จังหวัด
   primaryDeedNumber: string; // เลขที่ดินหลัก
   mapsUrl: string; // ลิงก์แผนที่ Google Maps
+  latitude?: number; // ละติจูด
+  longitude?: number; // ลองจิจูด
   
   // Land Area (ขนาดที่ดินรวม)
   rai: number; // ไร่
@@ -59,18 +63,32 @@ export interface LandPlot {
   
   status: LandStatus;
   notes: string; // หมายเหตุเพิ่มเติม
+  quickNotes?: QuickNoteItem[]; // บันทึกด่วน & ข้อสังเกตชั่วคราว
   images?: LandPlotImage[];
   updatedAt: string;
 }
+
+export type QuickNoteTag = 'observation' | 'reminder' | 'agent' | 'urgent' | 'visit' | 'general';
+
+export interface QuickNoteItem {
+  id: string;
+  text: string;
+  createdAt: string; // ISO string e.g. "2026-10-22T08:15:00.000Z"
+  tag?: QuickNoteTag;
+}
+
+export type AppFontSize = 'sm' | 'base' | 'lg' | 'xl';
 
 export interface PortfolioSettings {
   ownerName: string;
   portfolioTitle: string;
   defaultCommissionRate: number; // e.g. 3%
   defaultTaxRate: number; // e.g. 2%
+  expectedHoldingPeriodMonths?: number; // e.g. 12 or 24 months
   googleSheetId?: string;
   lastSyncedAt?: string;
   currency: string;
+  fontSize?: AppFontSize;
 }
 
 export interface KPIStats {

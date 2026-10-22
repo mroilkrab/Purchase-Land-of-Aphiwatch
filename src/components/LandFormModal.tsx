@@ -11,7 +11,8 @@ import {
   Coins, 
   Calculator, 
   Image as ImageIcon,
-  Check
+  Check,
+  AlertCircle
 } from 'lucide-react';
 import { LandPlot, SubParcel, LandPlotImage, LandStatus } from '../types/land';
 import { formatThaiArea } from '../services/storage';
@@ -20,6 +21,7 @@ interface LandFormModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: (plot: LandPlot) => void;
+  onDelete?: (plotId: string) => void;
   initialData?: LandPlot | null;
   nextOrderNumber: number;
 }
@@ -28,9 +30,11 @@ export const LandFormModal: React.FC<LandFormModalProps> = ({
   isOpen,
   onClose,
   onSave,
+  onDelete,
   initialData,
   nextOrderNumber,
 }) => {
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [formData, setFormData] = useState<Partial<LandPlot>>({
     orderNumber: nextOrderNumber,
     purchaseDate: '',
@@ -63,6 +67,7 @@ export const LandFormModal: React.FC<LandFormModalProps> = ({
     subParcels: [],
     images: [],
   });
+  const [formError, setFormError] = useState<string | null>(null);
 
   useEffect(() => {
     if (initialData) {
@@ -213,10 +218,11 @@ export const LandFormModal: React.FC<LandFormModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.title) {
-      alert('กรุณาระบุรายละเอียดหรือชื่อแปลงที่ดิน');
+    if (!formData.title?.trim()) {
+      setFormError('กรุณาระบุรายละเอียดหรือชื่อแปลงที่ดิน');
       return;
     }
+    setFormError(null);
 
     const finalPlot: LandPlot = {
       ...(formData as LandPlot),
@@ -249,6 +255,13 @@ export const LandFormModal: React.FC<LandFormModalProps> = ({
 
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="overflow-y-auto p-6 space-y-6 flex-1 text-xs sm:text-sm">
+          {formError && (
+            <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs font-medium flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+              <span>{formError}</span>
+            </div>
+          )}
+
           {/* Section 1: Basic Information */}
           <div className="space-y-4">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-emerald-400 flex items-center gap-2">
@@ -345,9 +358,19 @@ export const LandFormModal: React.FC<LandFormModalProps> = ({
                 <div className="flex gap-2">
                   <input
                     type="url"
-                    placeholder="https://maps.app.goo.gl/..."
+                    placeholder="https://maps.app.goo.gl/... หรือ https://maps.google.com/?q=15.6835,100.2285"
                     value={formData.mapsUrl || ''}
-                    onChange={(e) => setFormData({ ...formData, mapsUrl: e.target.value })}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      const next: Partial<LandPlot> = { mapsUrl: val };
+                      // Try extracting lat/lng if url contains @lat,lng or q=lat,lng
+                      const match = val.match(/@([0-9.-]+),([0-9.-]+)/) || val.match(/q=([0-9.-]+),([0-9.-]+)/);
+                      if (match) {
+                        next.latitude = parseFloat(match[1]);
+                        next.longitude = parseFloat(match[2]);
+                      }
+                      setFormData({ ...formData, ...next });
+                    }}
                     className="flex-1 px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-slate-200 focus:outline-none focus:border-emerald-500 text-xs font-mono"
                   />
                   {formData.mapsUrl && (
@@ -361,6 +384,30 @@ export const LandFormModal: React.FC<LandFormModalProps> = ({
                     </a>
                   )}
                 </div>
+              </div>
+
+              <div className="sm:col-span-6">
+                <label className="block text-xs text-slate-400 mb-1">พิกัดละติจูด (Latitude)</label>
+                <input
+                  type="number"
+                  step="any"
+                  placeholder="เช่น 15.6835"
+                  value={formData.latitude ?? ''}
+                  onChange={(e) => setFormData({ ...formData, latitude: e.target.value === '' ? undefined : parseFloat(e.target.value) })}
+                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-slate-200 focus:outline-none focus:border-emerald-500 font-mono text-xs"
+                />
+              </div>
+
+              <div className="sm:col-span-6">
+                <label className="block text-xs text-slate-400 mb-1">พิกัดลองจิจูด (Longitude)</label>
+                <input
+                  type="number"
+                  step="any"
+                  placeholder="เช่น 100.2285"
+                  value={formData.longitude ?? ''}
+                  onChange={(e) => setFormData({ ...formData, longitude: e.target.value === '' ? undefined : parseFloat(e.target.value) })}
+                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-slate-200 focus:outline-none focus:border-emerald-500 font-mono text-xs"
+                />
               </div>
             </div>
           </div>
@@ -728,22 +775,62 @@ export const LandFormModal: React.FC<LandFormModalProps> = ({
             />
           </div>
 
-          {/* Footer Save / Cancel Buttons */}
-          <div className="pt-4 border-t border-slate-800 flex items-center justify-end gap-3 sticky bottom-0 bg-slate-900 py-3 z-10">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs sm:text-sm font-medium transition-colors cursor-pointer"
-            >
-              ยกเลิก
-            </button>
-            <button
-              type="submit"
-              className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs sm:text-sm font-semibold shadow-lg shadow-emerald-600/30 flex items-center gap-2 transition-all cursor-pointer"
-            >
-              <Save className="w-4 h-4" />
-              บันทึกข้อมูลแปลงที่ดิน
-            </button>
+          {/* Footer Save / Cancel / Delete Buttons */}
+          <div className="pt-4 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3 sticky bottom-0 bg-slate-900 py-3 z-10">
+            <div>
+              {initialData && initialData.id && onDelete && (
+                <div>
+                  {!showDeleteConfirm ? (
+                    <button
+                      type="button"
+                      onClick={() => setShowDeleteConfirm(true)}
+                      className="px-3.5 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      ลบแปลงนี้
+                    </button>
+                  ) : (
+                    <div className="flex items-center gap-2 bg-rose-950/40 p-1.5 px-3 rounded-xl border border-rose-800/60">
+                      <span className="text-xs text-rose-300 font-medium">ยืนยันลบแปลงนี้?</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onDelete(initialData.id);
+                          onClose();
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold cursor-pointer"
+                      >
+                        ใช่, ลบเลย
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowDeleteConfirm(false)}
+                        className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs cursor-pointer"
+                      >
+                        ยกเลิก
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs sm:text-sm font-medium transition-colors cursor-pointer"
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="submit"
+                className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs sm:text-sm font-semibold shadow-lg shadow-emerald-600/30 flex items-center gap-2 transition-all cursor-pointer"
+              >
+                <Save className="w-4 h-4" />
+                {initialData ? 'บันทึกการแก้ไข' : 'บันทึกข้อมูลแปลงที่ดิน'}
+              </button>
+            </div>
           </div>
         </form>
       </div>

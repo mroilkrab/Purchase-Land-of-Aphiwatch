@@ -9,35 +9,145 @@ import {
   calculateKPIs,
   exportToCsvFile
 } from './services/storage';
-import { initAuth, googleSignIn, logoutGoogle } from './services/firebaseAuth';
-import { LandPlot, PortfolioSettings } from './types/land';
+import { initAuth, googleSignIn, logoutGoogle, getAccessToken } from './services/firebaseAuth';
+import { createGoogleSheet, updateExistingGoogleSheet } from './services/googleSheets';
+import { LandPlot, PortfolioSettings, AppFontSize } from './types/land';
 import { Navbar } from './components/Navbar';
 import { KPIDashboard } from './components/KPIDashboard';
 import { LandTable } from './components/LandTable';
+import { LandMapView } from './components/LandMapView';
+import { ReportsView } from './components/ReportsView';
 import { KPISimulator } from './components/KPISimulator';
 import { LiveArtifactView } from './components/LiveArtifactView';
 import { SettingsAndBackup } from './components/SettingsAndBackup';
 import { LandFormModal } from './components/LandFormModal';
 import { LandDetailModal } from './components/LandDetailModal';
-import { CheckCircle2, AlertCircle } from 'lucide-react';
+import { CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
 
 export default function App() {
   const [plots, setPlots] = useState<LandPlot[]>(() => loadPlotsFromStorage());
   const [settings, setSettings] = useState<PortfolioSettings>(() => loadSettingsFromStorage());
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'table' | 'simulator' | 'artifact' | 'settings'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'table' | 'map' | 'reports' | 'simulator' | 'artifact' | 'settings'>('dashboard');
 
   // Modals state
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingPlot, setEditingPlot] = useState<LandPlot | null>(null);
   const [selectedPlotForDetail, setSelectedPlotForDetail] = useState<LandPlot | null>(null);
+  const [tableSearchQuery, setTableSearchQuery] = useState<string>('');
+  const [tableStatusFilter, setTableStatusFilter] = useState<string>('all');
 
   // Auth state
   const [user, setUser] = useState<User | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  // Google Sheet Sync State
+  const [isSyncingSheet, setIsSyncingSheet] = useState(false);
+  const [sheetSyncStatus, setSheetSyncStatus] = useState<{
+    status: 'idle' | 'syncing' | 'success' | 'error';
+    message: string;
+    sheetUrl?: string;
+    lastSynced?: string;
+  }>({
+    status: 'idle',
+    message: settings.googleSheetId
+      ? 'เชื่อมต่อ Google Sheet แล้ว ข้อมูลจะซิงค์อัตโนมัติเมื่อ เพิ่ม, แก้ไข หรือ ลบ'
+      : 'เข้าสู่ระบบ Google เพื่อเปิดใช้งานระบบอัปเดต Google Sheet อัตโนมัติ',
+    sheetUrl: settings.googleSheetId ? `https://docs.google.com/spreadsheets/d/${settings.googleSheetId}` : undefined,
+  });
+
   const showToast = (msg: string) => {
     setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3000);
+    setTimeout(() => setToastMessage(null), 3500);
+  };
+
+  // Sync HTML font scale attribute and style whenever settings.fontSize changes
+  useEffect(() => {
+    const size = settings.fontSize || 'base';
+    document.documentElement.setAttribute('data-font-size', size);
+    const fontSizeMap: Record<string, string> = {
+      sm: '87.5%',
+      base: '100%',
+      lg: '112.5%',
+      xl: '125%',
+    };
+    document.documentElement.style.fontSize = fontSizeMap[size] || '100%';
+  }, [settings.fontSize]);
+
+  const handleFontSizeChange = (size: AppFontSize) => {
+    const updated = { ...settings, fontSize: size };
+    setSettings(updated);
+    saveSettingsToStorage(updated);
+    const labelMap: Record<string, string> = {
+      sm: 'กะทัดรัด (88%)',
+      base: 'มาตรฐาน (100%)',
+      lg: 'ตัวหนังสือใหญ่ (113%)',
+      xl: 'ใหญ่พิเศษ (125%)',
+    };
+    showToast(`ปรับขนาดตัวอักษรเป็น: ${labelMap[size] || size}`);
+  };
+
+  // Background Auto-sync to Google Sheets on any Add, Edit, or Delete
+  const syncPlotsToGoogleSheet = async (currentPlots: LandPlot[], actionLabel: string) => {
+    const token = await getAccessToken();
+    if (!token) {
+      setSheetSyncStatus((prev) => ({
+        ...prev,
+        message: 'บันทึกในระบบแล้ว (เข้าสู่ระบบ Google เพื่ออัปเดต Google Sheet อัตโนมัติ)',
+      }));
+      return;
+    }
+
+    try {
+      setIsSyncingSheet(true);
+      setSheetSyncStatus((prev) => ({
+        ...prev,
+        status: 'syncing',
+        message: `กำลังอัปเดต Google Sheet (${actionLabel})...`,
+      }));
+
+      let currentSheetId = settings.googleSheetId;
+      let spreadsheetUrl = '';
+
+      if (currentSheetId) {
+        const res = await updateExistingGoogleSheet(token, currentSheetId, currentPlots, settings);
+        spreadsheetUrl = res.spreadsheetUrl;
+      } else {
+        const res = await createGoogleSheet(token, currentPlots, settings);
+        currentSheetId = res.spreadsheetId;
+        spreadsheetUrl = res.spreadsheetUrl;
+        const newSettings = { ...settings, googleSheetId: currentSheetId };
+        setSettings(newSettings);
+        saveSettingsToStorage(newSettings);
+      }
+
+      const timeStr = new Date().toLocaleTimeString('th-TH');
+      setSheetSyncStatus({
+        status: 'success',
+        message: `อัปเดต Google Sheet อัตโนมัติแล้ว (${actionLabel}) เวลา ${timeStr}`,
+        sheetUrl: spreadsheetUrl,
+        lastSynced: timeStr,
+      });
+      showToast(`✅ ${actionLabel} และอัปเดต Google Sheet เรียบร้อยแล้ว!`);
+    } catch (err: any) {
+      console.error('Google Sheets sync error:', err);
+      setSheetSyncStatus((prev) => ({
+        ...prev,
+        status: 'error',
+        message: `ไม่สามารถอัปเดต Google Sheet ได้: ${err.message || 'โปรดตรวจสอบการเชื่อมต่อ'}`,
+      }));
+      showToast(`⚠️ ${actionLabel} ในระบบแล้ว แต่ซิงค์ Google Sheet ไม่สำเร็จ: ${err.message || ''}`);
+    } finally {
+      setIsSyncingSheet(false);
+    }
+  };
+
+  const handleManualSyncSheet = async () => {
+    const token = await getAccessToken();
+    if (!token) {
+      await handleLogin();
+      return;
+    }
+    await syncPlotsToGoogleSheet(plots, 'ซิงค์ข้อมูลทั้งหมด');
   };
 
   // Auth listener
@@ -61,6 +171,8 @@ export default function App() {
       if (res?.user) {
         setUser(res.user);
         showToast(`ยินดีต้อนรับคุณ ${res.user.displayName || res.user.email}`);
+        // If we have plots, offer or perform initial sync
+        syncPlotsToGoogleSheet(plots, 'เข้าสู่ระบบสำเร็จ ซิงค์ข้อมูล');
       }
     } catch (err: any) {
       console.error('Login error:', err);
@@ -85,7 +197,7 @@ export default function App() {
 
     if (exists) {
       updatedList = plots.map((p) => (p.id === savedPlot.id ? savedPlot : p));
-      showToast(`บันทึกข้อมูลแปลง #${savedPlot.orderNumber} เรียบร้อยแล้ว`);
+      showToast(`บันทึกการแก้ไขแปลง #${savedPlot.orderNumber} เรียบร้อยแล้ว`);
     } else {
       updatedList = [...plots, savedPlot];
       showToast(`เพิ่มแปลงใหม่ #${savedPlot.orderNumber} สำเร็จ`);
@@ -100,16 +212,26 @@ export default function App() {
     if (selectedPlotForDetail?.id === savedPlot.id) {
       setSelectedPlotForDetail(savedPlot);
     }
+
+    // Auto-update Google Sheet
+    syncPlotsToGoogleSheet(
+      updatedList,
+      exists ? `แก้ไขแปลง #${savedPlot.orderNumber}` : `เพิ่มแปลงใหม่ #${savedPlot.orderNumber}`
+    );
   };
 
   const handleDeletePlot = (plotId: string) => {
+    const targetPlot = plots.find((p) => p.id === plotId);
     const updated = plots.filter((p) => p.id !== plotId);
     setPlots(updated);
     savePlotsToStorage(updated);
     if (selectedPlotForDetail?.id === plotId) {
       setSelectedPlotForDetail(null);
     }
-    showToast('ลบแปลงที่ดินออกจากระบบแล้ว');
+    showToast(`ลบแปลงที่ดิน #${targetPlot?.orderNumber || ''} ออกจากระบบแล้ว`);
+
+    // Auto-update Google Sheet after deletion
+    syncPlotsToGoogleSheet(updated, `ลบแปลง #${targetPlot?.orderNumber || ''}`);
   };
 
   const handleDuplicatePlot = (plot: LandPlot) => {
@@ -129,6 +251,9 @@ export default function App() {
     setPlots(updated);
     savePlotsToStorage(updated);
     showToast(`คัดลอกเป็นแปลง #${nextOrder} สำเร็จ`);
+
+    // Auto-update Google Sheet after duplication
+    syncPlotsToGoogleSheet(updated, `เพิ่มแปลงสำเนา #${nextOrder}`);
   };
 
   const handleResetData = () => {
@@ -136,6 +261,7 @@ export default function App() {
     setPlots(defPlots);
     setSettings(defSettings);
     showToast('คืนค่าข้อมูลเริ่มต้น 10 แปลงตามตารางของคุณอภิวัชร์แล้ว');
+    syncPlotsToGoogleSheet(defPlots, 'คืนค่าข้อมูลเริ่มต้น 10 แปลง');
   };
 
   const handleImportPlots = (importedPlots: LandPlot[], importedSettings?: PortfolioSettings) => {
@@ -146,19 +272,21 @@ export default function App() {
       saveSettingsToStorage(importedSettings);
     }
     showToast(`นำเข้าข้อมูลที่ดินสำเร็จ ${importedPlots.length} รายการ`);
+    syncPlotsToGoogleSheet(importedPlots, `นำเข้าข้อมูล ${importedPlots.length} แปลง`);
   };
 
   const handleUpdateSettings = (newSettings: PortfolioSettings) => {
     setSettings(newSettings);
     saveSettingsToStorage(newSettings);
     showToast('บันทึกการตั้งค่าระบบเรียบร้อย');
+    syncPlotsToGoogleSheet(plots, 'อัปเดตการตั้งค่าระบบ');
   };
 
   const kpis = calculateKPIs(plots);
   const nextOrderNumber = Math.max(...plots.map((p) => p.orderNumber || 0), 0) + 1;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-['Prompt',sans-serif]">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-['Prompt',sans-serif] overflow-x-hidden max-w-full">
       {/* Navigation Bar */}
       <Navbar
         activeTab={activeTab}
@@ -171,10 +299,12 @@ export default function App() {
           setIsFormOpen(true);
         }}
         settings={settings}
+        fontSize={settings.fontSize || 'base'}
+        onFontSizeChange={handleFontSizeChange}
       />
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-5 min-w-0">
         {activeTab === 'dashboard' && (
           <KPIDashboard
             plots={plots}
@@ -182,13 +312,26 @@ export default function App() {
             settings={settings}
             onNavigateToSimulator={() => setActiveTab('simulator')}
             onNavigateToTable={() => setActiveTab('table')}
+            onNavigateToMap={() => setActiveTab('map')}
+            onNavigateToReports={() => setActiveTab('reports')}
             onSelectPlot={(plot) => setSelectedPlotForDetail(plot)}
+            onFilterTable={(query) => {
+              if (query === 'holding') {
+                setTableStatusFilter('holding');
+                setTableSearchQuery('');
+              } else {
+                setTableSearchQuery(query);
+              }
+              setActiveTab('table');
+            }}
           />
         )}
 
         {activeTab === 'table' && (
           <LandTable
             plots={plots}
+            initialSearchTerm={tableSearchQuery}
+            initialStatusFilter={tableStatusFilter}
             onSelectPlot={(plot) => setSelectedPlotForDetail(plot)}
             onEditPlot={(plot) => {
               setEditingPlot(plot);
@@ -201,6 +344,31 @@ export default function App() {
               setIsFormOpen(true);
             }}
             onExportCsv={() => exportToCsvFile(plots, settings)}
+            isSyncingSheet={isSyncingSheet}
+            sheetSyncStatus={sheetSyncStatus}
+            onSyncSheet={handleManualSyncSheet}
+            googleSheetId={settings.googleSheetId}
+            isGoogleAuthed={!!user}
+            onLoginGoogle={handleLogin}
+          />
+        )}
+
+        {activeTab === 'map' && (
+          <LandMapView
+            plots={plots}
+            onSelectPlot={(plot) => setSelectedPlotForDetail(plot)}
+            onEditPlot={(plot) => {
+              setEditingPlot(plot);
+              setIsFormOpen(true);
+            }}
+          />
+        )}
+
+        {activeTab === 'reports' && (
+          <ReportsView
+            plots={plots}
+            settings={settings}
+            onSelectPlot={(plot) => setSelectedPlotForDetail(plot)}
           />
         )}
 
@@ -241,6 +409,7 @@ export default function App() {
           setEditingPlot(null);
         }}
         onSave={handleSavePlot}
+        onDelete={handleDeletePlot}
         initialData={editingPlot}
         nextOrderNumber={nextOrderNumber}
       />
@@ -254,10 +423,14 @@ export default function App() {
           setEditingPlot(plot);
           setIsFormOpen(true);
         }}
+        onDelete={(plot) => {
+          handleDeletePlot(plot.id);
+        }}
         onSimulate={(plot) => {
           setSelectedPlotForDetail(null);
           setActiveTab('simulator');
         }}
+        settings={settings}
       />
 
       {/* Toast Notification */}

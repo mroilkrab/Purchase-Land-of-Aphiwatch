@@ -181,6 +181,50 @@ const getStatusLabel = (status: string) => {
 };
 
 /**
+ * Helper to extract spreadsheet ID if user pastes full Google Sheet URL
+ */
+export const extractSpreadsheetId = (input: string): string => {
+  if (!input) return '';
+  const trimmed = input.trim();
+  const match = trimmed.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  if (match) {
+    return match[1];
+  }
+  return trimmed;
+};
+
+/**
+ * Retrieves the actual title of the first worksheet in the spreadsheet
+ * (prevents 'Unable to parse range: Sheet1!A1' when the tab is named ชีต1, แผ่นงาน1, etc.)
+ */
+export const getFirstSheetTitle = async (
+  accessToken: string,
+  spreadsheetId: string
+): Promise<string> => {
+  try {
+    const cleanId = extractSpreadsheetId(spreadsheetId);
+    const res = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${cleanId}?fields=sheets(properties(sheetId,title))`,
+      {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }
+    );
+    if (res.ok) {
+      const data = await res.json();
+      if (data.sheets && data.sheets.length > 0 && data.sheets[0].properties?.title) {
+        return data.sheets[0].properties.title;
+      }
+    } else if (res.status === 401) {
+      throw new Error('เซสชัน Google หมดอายุ กรุณาเข้าสู่ระบบ Google ใหม่อีกครั้ง');
+    }
+  } catch (err: any) {
+    if (err.message && err.message.includes('เซสชัน Google หมดอายุ')) throw err;
+    console.warn('Could not inspect sheet title, defaulting to fallback:', err);
+  }
+  return 'รายละเอียดที่ดิน';
+};
+
+/**
  * Creates a new Google Spreadsheet and writes land data
  */
 export const createGoogleSheet = async (
@@ -189,8 +233,9 @@ export const createGoogleSheet = async (
   settings: PortfolioSettings
 ): Promise<ExportToSheetResult> => {
   const title = `${settings.portfolioTitle || 'รายละเอียดการซื้อที่ดิน'} (${new Date().toLocaleDateString('th-TH')})`;
+  const sheetTabTitle = 'รายละเอียดที่ดิน';
 
-  // 1. Create spreadsheet
+  // 1. Create spreadsheet with explicitly defined sheet tab name
   const createRes = await fetch('https://sheets.googleapis.com/v4/spreadsheets', {
     method: 'POST',
     headers: {
@@ -201,10 +246,20 @@ export const createGoogleSheet = async (
       properties: {
         title,
       },
+      sheets: [
+        {
+          properties: {
+            title: sheetTabTitle,
+          },
+        },
+      ],
     }),
   });
 
   if (!createRes.ok) {
+    if (createRes.status === 401) {
+      throw new Error('เซสชัน Google หมดอายุ กรุณาเข้าสู่ระบบ Google ใหม่อีกครั้ง');
+    }
     const err = await createRes.json().catch(() => ({}));
     throw new Error(err.error?.message || `Failed to create sheet: ${createRes.statusText}`);
   }
@@ -216,9 +271,10 @@ export const createGoogleSheet = async (
   // 2. Format values
   const values = formatLandPlotsForSheet(plots, settings);
 
-  // 3. Write data to Sheet1
+  // 3. Write data to the created sheet tab with properly quoted range
+  const targetRange = `'${sheetTabTitle}'!A1`;
   const updateRes = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Sheet1!A1?valueInputOption=USER_ENTERED`,
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(targetRange)}?valueInputOption=USER_ENTERED`,
     {
       method: 'PUT',
       headers: {
@@ -226,7 +282,7 @@ export const createGoogleSheet = async (
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        range: 'Sheet1!A1',
+        range: targetRange,
         majorDimension: 'ROWS',
         values,
       }),
@@ -234,6 +290,9 @@ export const createGoogleSheet = async (
   );
 
   if (!updateRes.ok) {
+    if (updateRes.status === 401) {
+      throw new Error('เซสชัน Google หมดอายุ กรุณาเข้าสู่ระบบ Google ใหม่อีกครั้ง');
+    }
     const err = await updateRes.json().catch(() => ({}));
     throw new Error(err.error?.message || `Failed to populate sheet data: ${updateRes.statusText}`);
   }
@@ -248,30 +307,45 @@ export const createGoogleSheet = async (
 };
 
 /**
- * Updates an existing Google Spreadsheet by ID
+ * Updates an existing Google Spreadsheet by ID or URL
  */
 export const updateExistingGoogleSheet = async (
   accessToken: string,
-  spreadsheetId: string,
+  spreadsheetIdOrUrl: string,
   plots: LandPlot[],
   settings: PortfolioSettings
 ): Promise<ExportToSheetResult> => {
+  const cleanId = extractSpreadsheetId(spreadsheetIdOrUrl);
+  if (!cleanId) {
+    throw new Error('กรุณาระบุ Google Spreadsheet ID หรือ URL ให้ถูกต้อง');
+  }
+
+  // 1. Inspect actual sheet title dynamically (e.g. ชีต1, แผ่นงาน1, Sheet1, รายละเอียดที่ดิน)
+  const sheetTitle = await getFirstSheetTitle(accessToken, cleanId);
   const values = formatLandPlotsForSheet(plots, settings);
 
-  // Clear existing content in Sheet1 first
-  await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Sheet1!A1:Z500:clear`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-    }
-  );
+  const clearRange = `'${sheetTitle}'!A1:Z1000`;
+  const targetRange = `'${sheetTitle}'!A1`;
 
+  // 2. Clear existing content in the sheet
+  try {
+    await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${cleanId}/values/${encodeURIComponent(clearRange)}:clear`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+  } catch (clearErr) {
+    console.warn('Could not clear sheet beforehand, overwriting directly:', clearErr);
+  }
+
+  // 3. Update with fresh values
   const updateRes = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Sheet1!A1?valueInputOption=USER_ENTERED`,
+    `https://sheets.googleapis.com/v4/spreadsheets/${cleanId}/values/${encodeURIComponent(targetRange)}?valueInputOption=USER_ENTERED`,
     {
       method: 'PUT',
       headers: {
@@ -279,7 +353,7 @@ export const updateExistingGoogleSheet = async (
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        range: 'Sheet1!A1',
+        range: targetRange,
         majorDimension: 'ROWS',
         values,
       }),
@@ -287,6 +361,9 @@ export const updateExistingGoogleSheet = async (
   );
 
   if (!updateRes.ok) {
+    if (updateRes.status === 401) {
+      throw new Error('เซสชัน Google หมดอายุ กรุณาเข้าสู่ระบบ Google ใหม่อีกครั้ง');
+    }
     const err = await updateRes.json().catch(() => ({}));
     throw new Error(err.error?.message || `Failed to update sheet: ${updateRes.statusText}`);
   }
@@ -294,8 +371,8 @@ export const updateExistingGoogleSheet = async (
   const updateData = await updateRes.json();
 
   return {
-    spreadsheetId,
-    spreadsheetUrl: `https://docs.google.com/spreadsheets/d/${spreadsheetId}`,
+    spreadsheetId: cleanId,
+    spreadsheetUrl: `https://docs.google.com/spreadsheets/d/${cleanId}`,
     updatedRows: updateData.updatedRows || values.length,
   };
 };

@@ -11,16 +11,23 @@ import {
   FileText, 
   Maximize2,
   Calculator,
-  Calendar
+  Calendar,
+  Trash2,
+  Clock,
+  AlertTriangle,
+  CheckCircle2,
+  Hourglass
 } from 'lucide-react';
-import { LandPlot } from '../types/land';
-import { formatCurrency, formatThaiArea } from '../services/storage';
+import { LandPlot, PortfolioSettings } from '../types/land';
+import { formatCurrency, formatThaiArea, calculatePlotHoldingInfo } from '../services/storage';
 
 interface LandDetailModalProps {
   plot: LandPlot | null;
   onClose: () => void;
   onEdit: (plot: LandPlot) => void;
   onSimulate: (plot: LandPlot) => void;
+  onDelete?: (plot: LandPlot) => void;
+  settings?: PortfolioSettings;
 }
 
 export const LandDetailModal: React.FC<LandDetailModalProps> = ({
@@ -28,14 +35,29 @@ export const LandDetailModal: React.FC<LandDetailModalProps> = ({
   onClose,
   onEdit,
   onSimulate,
+  onDelete,
+  settings,
 }) => {
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   if (!plot) return null;
 
   const otherCosts = (plot.taxAndFees || 0) + (plot.surveyCost || 0) + (plot.otherExpenses || 0);
   const projectedProfit = (plot.targetSalePrice || 0) > 0 ? (plot.targetSalePrice || 0) - (plot.totalCost || 0) : 0;
   const projectedROI = (plot.totalCost || 0) > 0 ? (projectedProfit / (plot.totalCost || 0)) * 100 : 0;
+
+  // Holding Period Calculations vs Settings
+  const holdingInfo = calculatePlotHoldingInfo(plot.purchaseDate);
+  const expectedHoldingMonths = settings?.expectedHoldingPeriodMonths || 12;
+  const isSold = plot.status === 'sold';
+  const monthsHeld = holdingInfo.monthsHeld;
+  const progressPercent = expectedHoldingMonths > 0 
+    ? Math.round((monthsHeld / expectedHoldingMonths) * 100) 
+    : 0;
+  const isOverdue = !isSold && monthsHeld > expectedHoldingMonths;
+  const monthsOverdue = isOverdue ? monthsHeld - expectedHoldingMonths : 0;
+  const clampedProgress = Math.min(100, Math.max(0, progressPercent));
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm overflow-y-auto">
@@ -103,6 +125,157 @@ export const LandDetailModal: React.FC<LandDetailModalProps> = ({
             </div>
           </div>
 
+          {/* Visual Holding Time vs Expected Holding Period Card */}
+          <div className={`p-4 rounded-xl border transition-all ${
+            isOverdue 
+              ? 'bg-rose-950/20 border-rose-500/40 shadow-lg shadow-rose-950/30 ring-1 ring-rose-500/20' 
+              : progressPercent >= 75 && !isSold
+              ? 'bg-amber-950/20 border-amber-500/40 shadow-lg shadow-amber-950/30'
+              : 'bg-slate-950/60 border-slate-800'
+          }`}>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+              <div className="flex items-center gap-2.5">
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                  isOverdue 
+                    ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30 animate-pulse' 
+                    : progressPercent >= 75 && !isSold
+                    ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                    : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                }`}>
+                  {isOverdue ? <AlertTriangle className="w-4 h-4" /> : <Clock className="w-4 h-4" />}
+                </div>
+                <div>
+                  <h4 className="font-semibold text-slate-200 text-xs sm:text-sm flex items-center gap-1.5">
+                    <span>ความคืบหน้าระยะเวลาถือครอง</span>
+                    <span className="text-slate-500 font-normal text-xs hidden sm:inline">(Holding Period Tracker)</span>
+                  </h4>
+                  <p className="text-[11px] text-slate-400">
+                    เทียบระยะเวลาถือครองจริงกับเป้าหมายระบบ ({expectedHoldingMonths} เดือน)
+                  </p>
+                </div>
+              </div>
+
+              {/* Status Badge */}
+              <div className="self-start sm:self-auto">
+                {isSold ? (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-800 text-slate-300 border border-slate-700">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> ขายสำเร็จแล้ว (ถือครอง {holdingInfo.formattedDuration})
+                  </span>
+                ) : isOverdue ? (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-rose-500/20 text-rose-400 border border-rose-500/40 shadow-sm animate-pulse">
+                    <AlertTriangle className="w-3.5 h-3.5" /> เกินเป้าหมาย {progressPercent}% (+{monthsOverdue} เดือน)
+                  </span>
+                ) : progressPercent >= 75 ? (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/20 text-amber-400 border border-amber-500/40">
+                    <Hourglass className="w-3.5 h-3.5" /> ใกล้ครบกำหนด {progressPercent}%
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                    <CheckCircle2 className="w-3.5 h-3.5" /> ตามเป้าหมาย {progressPercent}%
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Visual Progress Bar */}
+            <div className="space-y-1.5 my-3">
+              <div className="flex justify-between items-center text-[11px] font-mono">
+                <span className="text-slate-400">
+                  เริ่มซื้อ: <span className="text-slate-200">{plot.purchaseDate || '-'}</span>
+                </span>
+                <span className={`font-semibold ${isOverdue ? 'text-rose-400' : progressPercent >= 75 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                  {progressPercent}% ของเป้าหมาย {expectedHoldingMonths} เดือน
+                </span>
+              </div>
+
+              <div className="relative h-3.5 bg-slate-900 rounded-full overflow-hidden border border-slate-800 p-0.5">
+                {/* 100% Target Mark */}
+                <div 
+                  className="absolute top-0 bottom-0 w-0.5 bg-white/40 z-10"
+                  style={{ left: '100%' }}
+                  title="เป้าหมาย 100%"
+                />
+                
+                {/* Progress Fill */}
+                <div
+                  className={`h-full rounded-full transition-all duration-500 ${
+                    isSold
+                      ? 'bg-slate-600'
+                      : isOverdue
+                      ? 'bg-gradient-to-r from-amber-500 via-rose-500 to-rose-600 shadow-md shadow-rose-600/40'
+                      : progressPercent >= 75
+                      ? 'bg-gradient-to-r from-emerald-500 via-emerald-400 to-amber-500'
+                      : 'bg-gradient-to-r from-emerald-500 to-teal-400'
+                  }`}
+                  style={{ width: `${clampedProgress}%` }}
+                />
+              </div>
+
+              <div className="flex justify-between items-center text-[10px] text-slate-500 font-mono">
+                <span>0 เดือน</span>
+                <span>{Math.round(expectedHoldingMonths / 2)} เดือน (50%)</span>
+                <span className="text-slate-400 font-semibold">{expectedHoldingMonths} เดือน (เป้าหมาย 100%)</span>
+              </div>
+            </div>
+
+            {/* 4 Informative Metrics */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-2 border-t border-slate-800/80 text-xs">
+              <div className="p-2.5 rounded-lg bg-slate-900/80 border border-slate-800/60">
+                <span className="text-[11px] text-slate-400 block mb-0.5">ถือครองจริงแล้ว</span>
+                <span className="font-mono font-bold text-white text-xs sm:text-sm block">
+                  {holdingInfo.formattedDuration}
+                </span>
+                <span className="text-[10px] text-slate-500 font-mono">
+                  ({monthsHeld} เดือน)
+                </span>
+              </div>
+
+              <div className="p-2.5 rounded-lg bg-slate-900/80 border border-slate-800/60">
+                <span className="text-[11px] text-slate-400 block mb-0.5">เป้าหมายระบบ</span>
+                <span className="font-mono font-bold text-slate-200 text-xs sm:text-sm block">
+                  {expectedHoldingMonths} เดือน
+                </span>
+                <span className="text-[10px] text-slate-500 font-mono">
+                  ({expectedHoldingMonths >= 12 ? `${expectedHoldingMonths / 12} ปี` : 'ระยะสั้น'})
+                </span>
+              </div>
+
+              <div className={`p-2.5 rounded-lg border text-xs ${
+                isOverdue 
+                  ? 'bg-rose-950/40 border-rose-500/40 text-rose-300' 
+                  : 'bg-slate-900/80 border-slate-800/60 text-slate-300'
+              }`}>
+                <span className="text-[11px] text-slate-400 block mb-0.5">สถานะกำหนดการ</span>
+                {isSold ? (
+                  <span className="font-semibold text-slate-300 text-xs sm:text-sm block">
+                    ขายเรียบร้อยแล้ว
+                  </span>
+                ) : isOverdue ? (
+                  <span className="font-bold text-rose-400 text-xs sm:text-sm block font-mono">
+                    เกิน {monthsOverdue} เดือน
+                  </span>
+                ) : (
+                  <span className="font-semibold text-emerald-400 text-xs sm:text-sm block font-mono">
+                    เหลือ {expectedHoldingMonths - monthsHeld} เดือน
+                  </span>
+                )}
+                <span className="text-[10px] text-slate-500">
+                  {isOverdue ? 'ควรเร่งการตลาด/ทบทวนราคา' : isSold ? 'ปิดดีลแล้ว' : 'อยู่ในเกณฑ์ปกติ'}
+                </span>
+              </div>
+
+              <div className="p-2.5 rounded-lg bg-slate-900/80 border border-slate-800/60">
+                <span className="text-[11px] text-slate-400 block mb-0.5">ต้นทุนผูกพัน</span>
+                <span className="font-mono font-bold text-amber-400 text-xs sm:text-sm block">
+                  {formatCurrency(plot.totalCost)}
+                </span>
+                <span className="text-[10px] text-slate-500">
+                  เงินทุนที่ค้างอยู่ในแปลงนี้
+                </span>
+              </div>
+            </div>
+          </div>
+
           {/* Area & Deed Information */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 space-y-2">
@@ -120,11 +293,16 @@ export const LandDetailModal: React.FC<LandDetailModalProps> = ({
 
             <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 space-y-2">
               <span className="text-xs text-slate-400 uppercase tracking-wider font-semibold">
-                เลขที่โฉนด & แผนที่
+                เลขที่โฉนด & แผนที่ระบุพิกัด
               </span>
               <div className="text-base font-bold text-slate-200 font-mono">
                 เลขที่ดิน: {plot.primaryDeedNumber || '-'}
               </div>
+              {plot.latitude && plot.longitude && (
+                <div className="text-xs font-mono text-emerald-400">
+                  พิกัด: {plot.latitude.toFixed(5)}° N, {plot.longitude.toFixed(5)}° E
+                </div>
+              )}
               {plot.mapsUrl ? (
                 <a
                   href={plot.mapsUrl}
@@ -140,6 +318,27 @@ export const LandDetailModal: React.FC<LandDetailModalProps> = ({
               )}
             </div>
           </div>
+
+          {/* Interactive Map Visualizer in Detail Modal */}
+          {plot.latitude && plot.longitude && (
+            <div className="rounded-xl overflow-hidden border border-slate-800 bg-slate-950 space-y-2 p-3">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-semibold text-slate-300 flex items-center gap-1.5">
+                  <MapPin className="w-3.5 h-3.5 text-emerald-400" /> แผนที่แสดงตำแหน่งจริงของแปลง #{plot.orderNumber}
+                </span>
+                <span className="text-[11px] text-slate-500 font-mono">
+                  {plot.latitude.toFixed(4)}, {plot.longitude.toFixed(4)}
+                </span>
+              </div>
+              <div className="relative aspect-[21/9] sm:aspect-[24/9] rounded-lg overflow-hidden border border-slate-800">
+                <iframe
+                  title={`Map preview for ${plot.title}`}
+                  className="w-full h-full border-0"
+                  src={`https://www.openstreetmap.org/export/embed.html?bbox=${plot.longitude - 0.008}%2C${plot.latitude - 0.006}%2C${plot.longitude + 0.008}%2C${plot.latitude + 0.006}&layer=mapnik&marker=${plot.latitude}%2C${plot.longitude}`}
+                />
+              </div>
+            </div>
+          )}
 
           {/* Sub-parcels (if any) */}
           {plot.subParcels && plot.subParcels.length > 0 && (
@@ -282,17 +481,53 @@ export const LandDetailModal: React.FC<LandDetailModalProps> = ({
         </div>
 
         {/* Modal Footer Actions */}
-        <div className="px-6 py-4 border-t border-slate-800 bg-slate-900 flex items-center justify-between gap-3">
-          <button
-            onClick={() => {
-              onClose();
-              onSimulate(plot);
-            }}
-            className="px-4 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-500/30 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
-          >
-            <Calculator className="w-4 h-4" />
-            คำนวณราคาขาย (KPI Simulator)
-          </button>
+        <div className="px-6 py-4 border-t border-slate-800 bg-slate-900 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                onClose();
+                onSimulate(plot);
+              }}
+              className="px-4 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-500/30 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+            >
+              <Calculator className="w-4 h-4" />
+              คำนวณราคาขาย (KPI Simulator)
+            </button>
+
+            {onDelete && (
+              <div>
+                {!showDeleteConfirm ? (
+                  <button
+                    onClick={() => setShowDeleteConfirm(true)}
+                    className="px-3 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 text-xs font-medium flex items-center gap-1.5 cursor-pointer"
+                    title="ลบแปลงนี้ออกจากระบบ"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    ลบแปลงนี้
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-1.5 bg-rose-950/60 p-1 px-2.5 rounded-xl border border-rose-800/80">
+                    <span className="text-[11px] text-rose-300 font-medium">ยืนยันลบ?</span>
+                    <button
+                      onClick={() => {
+                        onClose();
+                        onDelete(plot);
+                      }}
+                      className="px-2 py-0.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-semibold cursor-pointer"
+                    >
+                      ใช่, ลบ
+                    </button>
+                    <button
+                      onClick={() => setShowDeleteConfirm(false)}
+                      className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] cursor-pointer"
+                    >
+                      ยกเลิก
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
 
           <div className="flex items-center gap-2">
             <button

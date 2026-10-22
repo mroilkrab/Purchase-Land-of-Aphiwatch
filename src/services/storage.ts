@@ -12,7 +12,18 @@ export const loadPlotsFromStorage = (): LandPlot[] => {
       return INITIAL_LAND_PLOTS;
     }
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) && parsed.length > 0 ? parsed : INITIAL_LAND_PLOTS;
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      return parsed.map((p: LandPlot) => {
+        if (!p.latitude || !p.longitude) {
+          const match = INITIAL_LAND_PLOTS.find((d) => d.id === p.id || d.orderNumber === p.orderNumber);
+          if (match?.latitude && match?.longitude) {
+            return { ...p, latitude: match.latitude, longitude: match.longitude };
+          }
+        }
+        return p;
+      });
+    }
+    return INITIAL_LAND_PLOTS;
   } catch (e) {
     console.error('Failed to load plots from local storage:', e);
     return INITIAL_LAND_PLOTS;
@@ -22,8 +33,25 @@ export const loadPlotsFromStorage = (): LandPlot[] => {
 export const savePlotsToStorage = (plots: LandPlot[]) => {
   try {
     localStorage.setItem(PLOTS_STORAGE_KEY, JSON.stringify(plots));
-  } catch (e) {
-    console.error('Failed to save plots to local storage:', e);
+  } catch (e: any) {
+    console.error('Failed to save plots to local storage (quota reached?):', e);
+    // If quota exceeded, sanitize heavy base64 strings so critical plot business data is never lost
+    try {
+      const sanitized = plots.map((p) => ({
+        ...p,
+        images: p.images?.map((img) => ({
+          ...img,
+          url: img.url && img.url.length > 500 && img.url.startsWith('data:')
+            ? `[image_ref_${img.id}]`
+            : img.url,
+        })),
+      }));
+      localStorage.setItem(PLOTS_STORAGE_KEY, JSON.stringify(sanitized));
+    } catch (inner) {
+      try {
+        sessionStorage.setItem(PLOTS_STORAGE_KEY, JSON.stringify(plots));
+      } catch (sess) {}
+    }
   }
 };
 
@@ -243,4 +271,144 @@ export const formatThaiArea = (rai: number, ngan: number, sqWah: number): string
 export const formatCurrency = (val: number | undefined | null): string => {
   if (val === undefined || val === null || isNaN(val)) return '0 ฿';
   return `${Number(val).toLocaleString('th-TH')} ฿`;
+};
+
+export interface HoldingPeriodInfo {
+  purchaseDateStr: string;
+  parsedDate: Date | null;
+  isValid: boolean;
+  monthsHeld: number;
+  yearsHeld: number;
+  formattedDuration: string;
+  isExceeded12Mo: boolean;
+  isExceeded24Mo: boolean;
+  isExceeded36Mo: boolean;
+  statusCategory: 'recent' | 'moderate' | 'warning' | 'critical';
+}
+
+/**
+ * Robust date parser supporting Thai Buddhist Era (พ.ศ.) and Common Era (ค.ศ.)
+ * e.g. "23/3/2569", "18/2/2568", "24/6/2557", "30/10/2555", "29-02-2555", "2024-03-25"
+ */
+export const parsePlotDate = (dateStr: string | undefined | null): Date | null => {
+  if (!dateStr || typeof dateStr !== 'string') return null;
+  const clean = dateStr.trim();
+  if (clean === '' || clean === '-' || clean === 'N/A') return null;
+
+  // Split by / or - or .
+  const parts = clean.split(/[/.-]/);
+  if (parts.length === 3) {
+    let day = parseInt(parts[0], 10);
+    let month = parseInt(parts[1], 10);
+    let year = parseInt(parts[2], 10);
+
+    // If format was YYYY-MM-DD
+    if (parts[0].length === 4) {
+      year = parseInt(parts[0], 10);
+      month = parseInt(parts[1], 10);
+      day = parseInt(parts[2], 10);
+    }
+
+    if (!isNaN(day) && !isNaN(month) && !isNaN(year)) {
+      // If Buddhist Era year (e.g. 2555, 2568, 2569) convert to Gregorian
+      if (year > 2400) {
+        year -= 543;
+      }
+      const d = new Date(year, month - 1, day);
+      if (!isNaN(d.getTime())) {
+        return d;
+      }
+    }
+  }
+
+  // Fallback to standard Date
+  const direct = new Date(clean);
+  if (!isNaN(direct.getTime())) {
+    if (direct.getFullYear() > 2400) {
+      direct.setFullYear(direct.getFullYear() - 543);
+    }
+    return direct;
+  }
+
+  return null;
+};
+
+/**
+ * Calculate elapsed holding period for a land plot relative to current date
+ */
+export const calculatePlotHoldingInfo = (
+  purchaseDateStr: string | undefined | null,
+  referenceDate: Date = new Date()
+): HoldingPeriodInfo => {
+  const parsed = parsePlotDate(purchaseDateStr);
+  if (!parsed) {
+    return {
+      purchaseDateStr: purchaseDateStr || '-',
+      parsedDate: null,
+      isValid: false,
+      monthsHeld: 0,
+      yearsHeld: 0,
+      formattedDuration: 'ไม่ระบุวันที่ซื้อ',
+      isExceeded12Mo: false,
+      isExceeded24Mo: false,
+      isExceeded36Mo: false,
+      statusCategory: 'recent',
+    };
+  }
+
+  const diffMs = referenceDate.getTime() - parsed.getTime();
+  if (diffMs < 0) {
+    return {
+      purchaseDateStr: purchaseDateStr || '',
+      parsedDate: parsed,
+      isValid: true,
+      monthsHeld: 0,
+      yearsHeld: 0,
+      formattedDuration: 'เพิ่งซื้อ / บันทึกล่วงหน้า',
+      isExceeded12Mo: false,
+      isExceeded24Mo: false,
+      isExceeded36Mo: false,
+      statusCategory: 'recent',
+    };
+  }
+
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  const monthsHeld = Math.max(0, Math.floor(diffDays / 30.4375));
+  const years = Math.floor(monthsHeld / 12);
+  const remainingMonths = monthsHeld % 12;
+
+  let formattedDuration = '';
+  if (years > 0 && remainingMonths > 0) {
+    formattedDuration = `${years} ปี ${remainingMonths} เดือน`;
+  } else if (years > 0) {
+    formattedDuration = `${years} ปี`;
+  } else {
+    formattedDuration = `${monthsHeld} เดือน`;
+  }
+
+  const isExceeded12Mo = monthsHeld >= 12;
+  const isExceeded24Mo = monthsHeld >= 24;
+  const isExceeded36Mo = monthsHeld >= 36;
+
+  let statusCategory: 'recent' | 'moderate' | 'warning' | 'critical' = 'recent';
+  if (isExceeded24Mo) {
+    statusCategory = 'critical';
+  } else if (isExceeded12Mo) {
+    statusCategory = 'warning';
+  } else if (monthsHeld >= 6) {
+    statusCategory = 'moderate';
+  }
+
+  return {
+    purchaseDateStr: purchaseDateStr || '',
+    parsedDate: parsed,
+    isValid: true,
+    monthsHeld,
+    yearsHeld: Number((monthsHeld / 12).toFixed(1)),
+    formattedDuration,
+    isExceeded12Mo,
+    isExceeded24Mo,
+    isExceeded36Mo,
+    statusCategory,
+  };
 };

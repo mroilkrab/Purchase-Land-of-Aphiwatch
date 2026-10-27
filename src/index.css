@@ -27,7 +27,17 @@ html, body, #root {
   overflow-x: hidden;
   max-width: 100vw;
   width: 100%;
-  -webkit-text-size-adjust: 100%;
+  font-family: 'Sarabun', 'Prompt', 'Noto Sans Thai', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* Mobile & iPad touch responsiveness */
+@media (max-width: 1024px) {
+  html, body {
+    -webkit-overflow-scrolling: touch;
+  }
 }
 
 /* Subtle clean scrollbars */
@@ -44,6 +54,145 @@ html, body, #root {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: #475569;
+}
+
+/* ========================================================= */
+/* THEME STYLING: LIGHT MODE SUPPORT (โหมดสว่าง)              */
+/* ========================================================= */
+html.light {
+  color-scheme: light;
+}
+
+html.light body,
+html.light #root,
+html.light .app-container {
+  background-color: #f8fafc !important; /* slate-50 */
+  color: #0f172a !important; /* slate-900 */
+}
+
+html.light ::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+html.light ::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+}
+html.light ::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Header & Navbars in Light Mode */
+html.light header,
+html.light nav.light-nav,
+html.light .bg-slate-900\/95,
+html.light .bg-slate-900\/90,
+html.light .bg-slate-900\/80 {
+  background-color: rgba(255, 255, 255, 0.95) !important;
+  border-color: #e2e8f0 !important;
+}
+
+/* Main Cards & Panels in Light Mode */
+html.light .bg-slate-950,
+html.light .bg-slate-950\/90,
+html.light .bg-slate-950\/80,
+html.light .bg-slate-950\/60,
+html.light .bg-slate-950\/40 {
+  background-color: #f1f5f9 !important;
+  border-color: #e2e8f0 !important;
+}
+
+html.light .bg-slate-900 {
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05);
+}
+
+html.light .bg-slate-850,
+html.light .bg-slate-800,
+html.light .bg-slate-800\/80,
+html.light .bg-slate-800\/60,
+html.light .bg-slate-800\/50,
+html.light .bg-slate-800\/40 {
+  background-color: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+}
+
+html.light .bg-slate-700,
+html.light .bg-slate-700\/60 {
+  background-color: #e2e8f0 !important;
+  color: #0f172a !important;
+}
+
+/* Borders in Light Mode */
+html.light .border-slate-800,
+html.light .border-slate-800\/80,
+html.light .border-slate-800\/60,
+html.light .border-slate-750,
+html.light .border-slate-700,
+html.light .border-slate-700\/80 {
+  border-color: #e2e8f0 !important;
+}
+
+/* Typography Contrast in Light Mode */
+html.light .text-white,
+html.light .text-slate-100 {
+  color: #0f172a !important; /* slate-900 deep readable */
+}
+
+html.light .text-slate-200,
+html.light .text-slate-300 {
+  color: #1e293b !important; /* slate-800 readable body */
+}
+
+html.light .text-slate-400 {
+  color: #475569 !important; /* slate-600 clear secondary text */
+}
+
+html.light .text-slate-500 {
+  color: #64748b !important; /* slate-500 muted text */
+}
+
+/* Table styles in Light Mode */
+html.light table,
+html.light tr.bg-slate-900\/60,
+html.light tr.bg-slate-900,
+html.light tr:hover {
+  background-color: #ffffff;
+}
+
+html.light thead,
+html.light thead tr,
+html.light thead th {
+  background-color: #f1f5f9 !important;
+  color: #334155 !important;
+  border-color: #e2e8f0 !important;
+}
+
+html.light tbody tr:hover {
+  background-color: #f8fafc !important;
+}
+
+/* Inputs, Textareas, Selects in Light Mode */
+html.light input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+html.light select,
+html.light textarea {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+
+html.light input:focus,
+html.light select:focus,
+html.light textarea:focus {
+  border-color: #10b981 !important;
+  background-color: #ffffff !important;
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.15) !important;
+}
+
+/* Modals & Overlays in Light Mode */
+html.light .bg-slate-950\/80,
+html.light .bg-slate-950\/70,
+html.light .bg-slate-900\/90 {
+  background-color: rgba(15, 23, 42, 0.45) !important;
 }
 
 /* Leaflet Custom Marker & Popup Styling */
@@ -64,6 +213,13 @@ html, body, #root {
   padding: 0 !important;
 }
 
+html.light .leaflet-popup-content-wrapper {
+  background: #ffffff !important;
+  color: #0f172a !important;
+  border: 1px solid #cbd5e1 !important;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1) !important;
+}
+
 .leaflet-popup-content {
   margin: 12px 14px !important;
   line-height: 1.4 !important;
@@ -74,7 +230,215 @@ html, body, #root {
   border: 1px solid #334155 !important;
 }
 
+html.light .leaflet-popup-tip {
+  background: #ffffff !important;
+  border: 1px solid #cbd5e1 !important;
+}
+
 .leaflet-container {
-  font-family: 'Prompt', sans-serif !important;
+  font-family: 'Prompt', 'Noto Sans Thai', sans-serif !important;
   z-index: 10 !important;
+}
+
+/* Print Styles for reliable browser printing & high-contrast black ink / monochrome paper output */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 12mm 10mm 15mm 10mm;
+    @bottom-right {
+      content: "หน้า " counter(page) " จาก " counter(pages);
+      font-size: 8.5pt;
+      font-family: 'Sarabun', 'Prompt', 'Noto Sans Thai', sans-serif;
+      color: #334155;
+      font-weight: 600;
+    }
+    @bottom-left {
+      content: "ระบบบริหารจัดการพอร์ตที่ดิน (Land Portfolio Management)";
+      font-size: 8pt;
+      font-family: 'Sarabun', 'Prompt', 'Noto Sans Thai', sans-serif;
+      color: #64748b;
+    }
+  }
+
+  html, body, #root, .app-container {
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    font-size: 9.5pt !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    font-family: 'Sarabun', 'Prompt', 'Noto Sans Thai', sans-serif !important;
+  }
+
+  /* Force exact color reproduction & kill shadows that waste ink */
+  *, *::before, *::after {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+
+  /* Hide navigation, headers, buttons, toasts, modals backdrop, and interactive toolbars */
+  nav,
+  header,
+  button,
+  .print\:hidden,
+  [class*="print:hidden"],
+  #navbar-root,
+  .no-print,
+  #pdf-toast-container,
+  [role="alert"] {
+    display: none !important;
+  }
+
+  /* Expand print report container */
+  #printable-performance-report, #printable-plot-summary, #printable-land-table-report {
+    display: block !important;
+    position: static !important;
+    left: auto !important;
+    top: auto !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    font-family: 'Sarabun', 'Prompt', 'Noto Sans Thai', sans-serif !important;
+  }
+
+  /* Discrete A4 page structure for multi-page PDF & paper print */
+  .pdf-page {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-height: 270mm !important;
+    page-break-after: always !important;
+    break-after: page !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    margin: 0 !important;
+    padding: 6mm 4mm !important;
+    box-sizing: border-box !important;
+    background: #ffffff !important;
+  }
+
+  .pdf-page:last-child {
+    page-break-after: auto !important;
+    break-after: auto !important;
+  }
+
+  /* Prevent Thai text & glyph overlapping */
+  p, span, div, h1, h2, h3, h4, th, td, strong {
+    letter-spacing: normal !important;
+    word-break: break-word !important;
+  }
+
+  /* Convert all slate and dark backgrounds to pure white with crisp borders */
+  .bg-slate-900,
+  .bg-slate-950,
+  .bg-slate-850,
+  .bg-slate-800,
+  .bg-slate-700,
+  [class*="bg-slate-"],
+  [class*="from-slate-"],
+  [class*="via-slate-"],
+  [class*="to-slate-"] {
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+    background-image: none !important;
+    border-color: #94a3b8 !important;
+    color: #000000 !important;
+  }
+
+  /* Typography: Force pitch black & high-contrast charcoal for black ink printing */
+  .text-white,
+  .text-slate-100,
+  .text-slate-200,
+  .text-slate-300,
+  .text-slate-400,
+  .text-slate-500 {
+    color: #000000 !important;
+  }
+
+  .text-emerald-400,
+  .text-emerald-300,
+  .text-teal-300,
+  .text-teal-400,
+  .text-blue-400,
+  .text-amber-400 {
+    color: #000000 !important;
+    font-weight: 700 !important;
+  }
+
+  .border-slate-800,
+  .border-slate-750,
+  .border-slate-700,
+  .border-slate-600 {
+    border-color: #94a3b8 !important;
+  }
+
+  /* Table styles for print: crisp borders, clear rows, high-contrast black ink */
+  table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    border: 1.5px solid #475569 !important;
+    page-break-inside: auto;
+  }
+
+  tr {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  thead {
+    display: table-header-group;
+  }
+
+  tfoot {
+    display: table-footer-group;
+  }
+
+  th, td {
+    border: 1px solid #94a3b8 !important;
+    padding: 6px 8px !important;
+    font-size: 8.5pt !important;
+    color: #000000 !important;
+  }
+
+  th {
+    background-color: #f1f5f9 !important;
+    color: #000000 !important;
+    font-weight: 700 !important;
+    border-bottom: 2px solid #334155 !important;
+  }
+
+  tfoot {
+    background-color: #f1f5f9 !important;
+    border-top: 2px solid #334155 !important;
+  }
+
+  /* Progress bar print optimization */
+  .print-progress-track {
+    background-color: #e2e8f0 !important;
+    border: 1px solid #94a3b8 !important;
+  }
+
+  .print-progress-bar {
+    background-color: #334155 !important;
+    background-image: none !important;
+  }
+
+  /* Page break rules */
+  .page-break-before {
+    page-break-before: always !important;
+    break-before: page !important;
+  }
+
+  .avoid-break {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
 }

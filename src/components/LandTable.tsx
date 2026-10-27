@@ -30,10 +30,14 @@ import {
   Building,
   Tag,
   Clock,
-  AlertTriangle
+  AlertTriangle,
+  Printer,
+  Receipt
 } from 'lucide-react';
-import { LandPlot, LandStatus } from '../types/land';
+import { LandPlot, LandStatus, PortfolioSettings } from '../types/land';
 import { formatCurrency, formatThaiArea, calculatePlotHoldingInfo } from '../services/storage';
+import { LandComparisonModal } from './LandComparisonModal';
+import { getPlotLandTax, TAX_USAGE_CONFIGS } from '../services/landTax';
 
 interface LandTableProps {
   plots: LandPlot[];
@@ -56,6 +60,7 @@ interface LandTableProps {
   googleSheetId?: string;
   isGoogleAuthed?: boolean;
   onLoginGoogle?: () => void;
+  settings?: PortfolioSettings;
 }
 
 type PriceRangePreset = 'all' | 'under_100k' | '100k_500k' | '500k_1m' | '1m_5m' | 'over_5m' | 'custom';
@@ -77,9 +82,18 @@ export const LandTable: React.FC<LandTableProps> = ({
   googleSheetId,
   isGoogleAuthed = false,
   onLoginGoogle,
+  settings,
 }) => {
   // View mode: 'table' (full spreadsheet) or 'cards' (responsive grid fitting every screen)
   const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
+
+  // Print Report modal state
+  const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
+  const [printScope, setPrintScope] = useState<'all' | 'filtered'>('filtered');
+
+  // Multi-select for Land Comparison
+  const [selectedPlotIds, setSelectedPlotIds] = useState<string[]>([]);
+  const [isComparisonOpen, setIsComparisonOpen] = useState<boolean>(false);
 
   // State for in-app delete confirmation modal
   const [plotToDelete, setPlotToDelete] = useState<LandPlot | null>(null);
@@ -118,6 +132,21 @@ export const LandTable: React.FC<LandTableProps> = ({
   const toggleExpand = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     setExpandedPlots((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const toggleSelectPlot = (id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setSelectedPlotIds((prev) =>
+      prev.includes(id) ? prev.filter((pId) => pId !== id) : [...prev, id]
+    );
+  };
+
+  const handleSelectAll = () => {
+    if (selectedPlotIds.length === filteredPlots.length) {
+      setSelectedPlotIds([]);
+    } else {
+      setSelectedPlotIds(filteredPlots.map((p) => p.id));
+    }
   };
 
   // Distinct Provinces
@@ -319,6 +348,44 @@ export const LandTable: React.FC<LandTableProps> = ({
   const totalOtherFiltered = useMemo(() => filteredPlots.reduce((sum, p) => sum + (p.otherExpenses || 0), 0), [filteredPlots]);
   const totalTargetSaleFiltered = useMemo(() => filteredPlots.reduce((sum, p) => sum + (p.targetSalePrice || 0), 0), [filteredPlots]);
   const totalSqWahFiltered = useMemo(() => filteredPlots.reduce((sum, p) => sum + (p.totalSqWah || 0), 0), [filteredPlots]);
+  const totalLandTaxFiltered = useMemo(() => filteredPlots.reduce((sum, p) => sum + getPlotLandTax(p).annualTax, 0), [filteredPlots]);
+
+  // Selected plots for printing based on user choice
+  const printPlots = useMemo(() => {
+    return printScope === 'all' ? plots : filteredPlots;
+  }, [printScope, plots, filteredPlots]);
+
+  const printTotals = useMemo(() => {
+    let totalSqWah = 0;
+    let totalPurchase = 0;
+    let totalFees = 0;
+    let totalCost = 0;
+    let totalTargetOrSold = 0;
+
+    let totalAnnualLandTax = 0;
+
+    printPlots.forEach((p) => {
+      totalSqWah += Number(p.totalSqWah) || 0;
+      totalPurchase += Number(p.purchasePrice) || 0;
+      const fees = (Number(p.taxAndFees) || 0) + (Number(p.surveyCost) || 0) + (Number(p.otherExpenses) || 0);
+      totalFees += fees;
+      totalCost += Number(p.totalCost) || 0;
+      const targetOrSold = p.status === 'sold' ? (Number(p.soldPrice) || 0) : (Number(p.targetSalePrice) || 0);
+      totalTargetOrSold += targetOrSold;
+      const taxInfo = getPlotLandTax(p);
+      totalAnnualLandTax += taxInfo.annualTax;
+    });
+
+    return {
+      totalPlots: printPlots.length,
+      totalSqWah,
+      totalPurchase,
+      totalFees,
+      totalCost,
+      totalTargetOrSold,
+      totalAnnualLandTax,
+    };
+  }, [printPlots]);
 
   return (
     <div className="space-y-4 max-w-full">
@@ -467,6 +534,16 @@ export const LandTable: React.FC<LandTableProps> = ({
             >
               <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
               <span className="hidden md:inline">CSV</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setIsPrintModalOpen(true)}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-medium border border-slate-700 transition-colors cursor-pointer"
+              title="พิมพ์รายงานสรุปพอร์ตแปลงที่ดิน (Print Report / A4)"
+            >
+              <Printer className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="hidden md:inline">พิมพ์รายงาน</span>
             </button>
 
             <button
@@ -826,9 +903,17 @@ export const LandTable: React.FC<LandTableProps> = ({
                     onClick={() => onSelectPlot(plot)}
                     className="p-4 sm:p-5 rounded-2xl bg-slate-900 border border-slate-800 hover:border-emerald-500/40 hover:shadow-xl hover:shadow-emerald-950/20 transition-all cursor-pointer flex flex-col justify-between space-y-4 group relative min-w-0"
                   >
-                    {/* Top Row: Order Badge, Status, Land Type */}
+                    {/* Top Row: Select Checkbox, Order Badge, Status, Land Type */}
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={selectedPlotIds.includes(plot.id)}
+                          onChange={(e) => toggleSelectPlot(plot.id, e as any)}
+                          onClick={(e) => e.stopPropagation()}
+                          className="w-4 h-4 rounded border-slate-700 bg-slate-800 text-cyan-500 focus:ring-0 cursor-pointer"
+                          title="เลือกเพื่อเปรียบเทียบ"
+                        />
                         <span className="w-7 h-7 rounded-lg bg-slate-800 text-emerald-400 font-mono font-bold text-xs flex items-center justify-center border border-slate-700">
                           #{plot.orderNumber}
                         </span>
@@ -935,6 +1020,20 @@ export const LandTable: React.FC<LandTableProps> = ({
                           <span className="font-mono text-slate-400">+{formatCurrency(otherCosts)}</span>
                         </div>
                       )}
+                      {(() => {
+                        const plotTax = getPlotLandTax(plot);
+                        return (
+                          <div className="flex justify-between items-baseline text-[11px] text-rose-300">
+                            <span className="flex items-center gap-1 text-slate-400">
+                              <Receipt className="w-3 h-3 text-rose-400" />
+                              ภาษีที่ดิน/ปี:
+                            </span>
+                            <span className="font-mono font-medium text-rose-300">
+                              {plotTax.annualTax === 0 ? '0 ฿ (ยกเว้น)' : `${formatCurrency(plotTax.annualTax)}`}
+                            </span>
+                          </div>
+                        );
+                      })()}
                       <div className="flex justify-between items-baseline pt-1.5 border-t border-slate-800">
                         <span className="text-emerald-400 font-semibold">ราคาตั้งใจขาย (KPI):</span>
                         <span className="font-bold font-mono text-emerald-400">
@@ -1049,6 +1148,15 @@ export const LandTable: React.FC<LandTableProps> = ({
             <table className="w-full text-left text-xs border-collapse min-w-[1300px]">
               <thead>
                 <tr className="bg-slate-800/90 border-b border-slate-700 text-slate-300 font-semibold sticky top-0 z-20">
+                  <th className="py-3 px-2 w-8 text-center">
+                    <input
+                      type="checkbox"
+                      checked={filteredPlots.length > 0 && selectedPlotIds.length === filteredPlots.length}
+                      onChange={handleSelectAll}
+                      className="w-4 h-4 rounded border-slate-700 bg-slate-800 text-cyan-500 focus:ring-0 cursor-pointer"
+                      title="เลือกทั้งหมด"
+                    />
+                  </th>
                   <th className="py-3 px-3 w-12 text-center">ลำดับ</th>
                   <th className="py-3 px-3 w-24">วันที่ซื้อ</th>
                   <th className="py-3 px-3 w-24">วันที่ขาย</th>
@@ -1061,6 +1169,7 @@ export const LandTable: React.FC<LandTableProps> = ({
                   <th className="py-3 px-3 text-right">ราคาซื้อ</th>
                   <th className="py-3 px-3 text-right">ภาษี/รังวัด/อื่นๆ</th>
                   <th className="py-3 px-3 text-right font-bold text-white bg-slate-800">ต้นทุนรวมทั้งสิ้น</th>
+                  <th className="py-3 px-3 text-right text-rose-300">ภาษีที่ดิน/ปี</th>
                   <th className="py-3 px-3 text-right text-emerald-400">ราคาตั้งใจขาย (KPI)</th>
                   <th className="py-3 px-3 text-center">สถานะ</th>
                   {/* Sticky Action Column so actions are always reachable */}
@@ -1073,7 +1182,7 @@ export const LandTable: React.FC<LandTableProps> = ({
               <tbody className="divide-y divide-slate-800/80">
                 {filteredPlots.length === 0 ? (
                   <tr>
-                    <td colSpan={15} className="py-16 text-center text-slate-400 space-y-2">
+                    <td colSpan={17} className="py-16 text-center text-slate-400 space-y-2">
                       <div className="text-slate-500 font-medium text-sm">
                         ไม่พบข้อมูลแปลงที่ดินที่ตรงกับเงื่อนไขการค้นหา
                       </div>
@@ -1101,6 +1210,15 @@ export const LandTable: React.FC<LandTableProps> = ({
                           onClick={() => onSelectPlot(plot)}
                           className="hover:bg-slate-800/60 transition-colors cursor-pointer group"
                         >
+                          <td className="py-3 px-2 text-center" onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              checked={selectedPlotIds.includes(plot.id)}
+                              onChange={(e) => toggleSelectPlot(plot.id, e as any)}
+                              className="w-4 h-4 rounded border-slate-700 bg-slate-800 text-cyan-500 focus:ring-0 cursor-pointer"
+                              title="เลือกแปลงนี้เพื่อเปรียบเทียบ"
+                            />
+                          </td>
                           <td className="py-3 px-3 text-center font-mono text-slate-400">
                             {hasSubParcels ? (
                               <button
@@ -1187,6 +1305,24 @@ export const LandTable: React.FC<LandTableProps> = ({
                           <td className="py-3 px-3 text-right font-mono font-bold text-white bg-slate-800/40">
                             {formatCurrency(plot.totalCost)}
                           </td>
+                          <td className="py-3 px-3 text-right font-mono text-xs">
+                            {(() => {
+                              const tax = getPlotLandTax(plot);
+                              const config = TAX_USAGE_CONFIGS[tax.usageType];
+                              return (
+                                <div>
+                                  <span className={tax.annualTax > 0 ? "font-semibold text-rose-300" : "text-emerald-400 font-medium"}>
+                                    {formatCurrency(tax.annualTax)}
+                                  </span>
+                                  <div className="text-[10px] text-slate-400 flex items-center justify-end gap-1">
+                                    <span>{config?.shortLabel || tax.usageType}</span>
+                                    <span>•</span>
+                                    <span>{tax.effectiveRatePercent.toFixed(2)}%</span>
+                                  </div>
+                                </div>
+                              );
+                            })()}
+                          </td>
                           <td className="py-3 px-3 text-right font-mono font-semibold text-emerald-400">
                             {plot.targetSalePrice > 0 ? formatCurrency(plot.targetSalePrice) : '-'}
                           </td>
@@ -1253,6 +1389,7 @@ export const LandTable: React.FC<LandTableProps> = ({
                               key={sp.id}
                               className="bg-slate-950/60 text-slate-400 border-l-2 border-emerald-500/50"
                             >
+                              <td className="py-2 px-2"></td>
                               <td className="py-2 px-3 text-center text-[10px] font-mono text-slate-500">
                                 └ {plot.orderNumber}.{idx + 1}
                               </td>
@@ -1287,7 +1424,7 @@ export const LandTable: React.FC<LandTableProps> = ({
                               <td className="py-2 px-3 text-right font-mono text-slate-400 text-[11px]">
                                 {sp.totalSqWah}
                               </td>
-                              <td colSpan={5} className="py-2 px-3 text-slate-600 text-[10px] italic">
+                              <td colSpan={6} className="py-2 px-3 text-slate-600 text-[10px] italic">
                                 (นับรวมในแปลงแม่ #{plot.orderNumber})
                               </td>
                               <td className="py-2 px-3 text-center sticky right-0 bg-slate-950/95 backdrop-blur-sm border-l border-slate-800/80 shadow-[-4px_0_8px_rgba(0,0,0,0.3)] z-10">
@@ -1322,6 +1459,9 @@ export const LandTable: React.FC<LandTableProps> = ({
                   </td>
                   <td className="py-3 px-3 text-right font-mono text-emerald-400 text-sm font-bold bg-slate-800">
                     {formatCurrency(totalCostFiltered)}
+                  </td>
+                  <td className="py-3 px-3 text-right font-mono text-rose-300 font-bold">
+                    {formatCurrency(totalLandTaxFiltered)}
                   </td>
                   <td className="py-3 px-3 text-right font-mono text-emerald-300">
                     {formatCurrency(totalTargetSaleFiltered)}
@@ -1420,6 +1560,311 @@ export const LandTable: React.FC<LandTableProps> = ({
           </div>
         </div>
       )}
+
+      {/* Floating Bottom Comparison Action Bar */}
+      {selectedPlotIds.length > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-slate-900/95 backdrop-blur-md px-5 py-3 rounded-2xl border border-cyan-500/50 shadow-2xl shadow-cyan-950/80 flex items-center gap-4 text-xs animate-fade-in">
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse"></span>
+            <span className="text-slate-200">
+              เลือกแล้ว <strong className="text-white font-mono text-sm">{selectedPlotIds.length}</strong> แปลง
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsComparisonOpen(true)}
+              disabled={selectedPlotIds.length < 2}
+              className={`px-4 py-2 rounded-xl font-bold flex items-center gap-1.5 transition-all shadow-md ${
+                selectedPlotIds.length >= 2
+                  ? 'bg-cyan-500 hover:bg-cyan-400 text-slate-950 shadow-cyan-500/30 cursor-pointer'
+                  : 'bg-slate-800 text-slate-500 cursor-not-allowed'
+              }`}
+              title={selectedPlotIds.length < 2 ? 'โปรดเลือกอย่างน้อย 2 แปลงเพื่อเปรียบเทียบ' : 'เปิดมุมมองเปรียบเทียบเคียงข้างกัน'}
+            >
+              <ArrowRightLeft className="w-4 h-4" />
+              <span>เปรียบเทียบแปลงที่ดิน {selectedPlotIds.length >= 2 ? `(${selectedPlotIds.length} แปลง)` : '(เลือก 2 แปลงขึ้นไป)'}</span>
+            </button>
+
+            <button
+              onClick={() => setSelectedPlotIds([])}
+              className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium cursor-pointer"
+            >
+              ล้างที่เลือก
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Side-by-side Land Comparison Modal */}
+      <LandComparisonModal
+        plots={plots.filter((p) => selectedPlotIds.includes(p.id))}
+        isOpen={isComparisonOpen}
+        onClose={() => setIsComparisonOpen(false)}
+        onSelectPlot={onSelectPlot}
+      />
+
+      {/* Print Report Preview & Configuration Modal */}
+      {isPrintModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+          <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden p-6 space-y-5 animate-scale-up">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Printer className="w-5 h-5 text-emerald-400" />
+                <h3 className="text-base font-bold text-white">พิมพ์รายงานสรุปพอร์ตแปลงที่ดิน</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsPrintModalOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-200 rounded-lg hover:bg-slate-800 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4 text-xs sm:text-sm text-slate-300">
+              <p className="text-xs text-slate-400">
+                ระบบได้จัดเตรียมรายงานในรูปแบบเอกสารทางการ (A4) พร้อมตารางสรุปการเงิน ยอดรวม และช่องลงนามเรียบร้อยแล้ว
+              </p>
+
+              <div className="space-y-2">
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                  เลือกขอบเขตข้อมูลที่ต้องการพิมพ์:
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPrintScope('filtered')}
+                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                      printScope === 'filtered'
+                        ? 'bg-emerald-500/15 border-emerald-500 text-white font-semibold'
+                        : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-800/80'
+                    }`}
+                  >
+                    <div className="font-semibold text-white">แปลงที่กรองอยู่</div>
+                    <div className="text-[11px] text-emerald-400 font-mono mt-0.5">
+                      {filteredPlots.length} แปลง (ตามตัวกรองปัจจุบัน)
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setPrintScope('all')}
+                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                      printScope === 'all'
+                        ? 'bg-emerald-500/15 border-emerald-500 text-white font-semibold'
+                        : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-800/80'
+                    }`}
+                  >
+                    <div className="font-semibold text-white">แปลงทั้งหมดในพอร์ต</div>
+                    <div className="text-[11px] text-emerald-400 font-mono mt-0.5">
+                      {plots.length} แปลง (ทั้งพอร์ต)
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Preview Stats summary */}
+              <div className="p-3.5 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-2 text-xs">
+                <div className="flex justify-between text-slate-300">
+                  <span>จำนวนแปลงที่จะพิมพ์:</span>
+                  <span className="font-bold text-white font-mono">{printTotals.totalPlots} แปลง</span>
+                </div>
+                <div className="flex justify-between text-slate-300">
+                  <span>เนื้อที่รวม:</span>
+                  <span className="font-bold text-white font-mono">{formatThaiArea(printTotals.totalSqWah)}</span>
+                </div>
+                <div className="flex justify-between text-slate-300">
+                  <span>รวมต้นทุนทั้งสิ้น:</span>
+                  <span className="font-bold text-emerald-400 font-mono">{formatCurrency(printTotals.totalCost)}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setIsPrintModalOpen(false)}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold cursor-pointer"
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsPrintModalOpen(false);
+                  setTimeout(() => {
+                    window.print();
+                  }, 250);
+                }}
+                className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-lg shadow-emerald-600/30 flex items-center gap-1.5 transition-all cursor-pointer"
+              >
+                <Printer className="w-4 h-4" />
+                <span>สั่งพิมพ์รายงาน (A4 / PDF)</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Hidden container for print media (@media print in index.css expands this to full-page black & white) */}
+      <div id="printable-land-table-report" className="hidden print:block p-8 bg-white text-black font-sans">
+        {/* Document Header */}
+        <div className="border-b-2 border-slate-900 pb-4 mb-6 flex justify-between items-start">
+          <div>
+            <h1 className="text-xl font-bold text-black tracking-tight mb-1">
+              {settings?.portfolioTitle || 'รายงานบัญชีแปลงที่ดินและการเงิน'}
+            </h1>
+            <p className="text-xs text-slate-700">
+              เจ้าของพอร์ต: <span className="font-semibold text-black">{settings?.ownerName || 'ผู้ดูแลระบบ'}</span> • สกุลเงิน: {settings?.currency || 'THB (บาท)'}
+            </p>
+          </div>
+          <div className="text-right text-xs text-slate-700 space-y-0.5">
+            <p className="font-semibold text-black">เอกสารรายงานบัญชีพอร์ตที่ดินทางการ</p>
+            <p>วันที่พิมพ์: {new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })} น.</p>
+            <p>ขอบเขต: {printScope === 'all' ? `ทั้งหมด (${plots.length} แปลง)` : `กรองตามเงื่อนไข (${filteredPlots.length} แปลง)`}</p>
+          </div>
+        </div>
+
+        {/* KPI Summary Cards */}
+        <div className="grid grid-cols-5 gap-3 mb-6">
+          <div className="p-3 border border-slate-400 rounded bg-slate-50">
+            <span className="text-[10px] text-slate-600 block uppercase">จำนวนแปลงที่รายงาน</span>
+            <span className="text-lg font-bold text-black">{printTotals.totalPlots} แปลง</span>
+          </div>
+          <div className="p-3 border border-slate-400 rounded bg-slate-50">
+            <span className="text-[10px] text-slate-600 block uppercase">เนื้อที่รวม</span>
+            <span className="text-lg font-bold text-black">{formatThaiArea(printTotals.totalSqWah)}</span>
+          </div>
+          <div className="p-3 border border-slate-400 rounded bg-slate-50">
+            <span className="text-[10px] text-slate-600 block uppercase">ต้นทุนรวมทั้งสิ้น</span>
+            <span className="text-lg font-bold text-black">{formatCurrency(printTotals.totalCost)}</span>
+          </div>
+          <div className="p-3 border border-slate-400 rounded bg-slate-50">
+            <span className="text-[10px] text-slate-600 block uppercase">ภาษีที่ดิน/ปี รวม</span>
+            <span className="text-lg font-bold text-rose-700">{formatCurrency(printTotals.totalAnnualLandTax)}</span>
+          </div>
+          <div className="p-3 border border-slate-400 rounded bg-slate-50">
+            <span className="text-[10px] text-slate-600 block uppercase">มูลค่าเป้าหมาย/ยอดขาย</span>
+            <span className="text-lg font-bold text-black">{formatCurrency(printTotals.totalTargetOrSold)}</span>
+          </div>
+        </div>
+
+        {/* Financial Table */}
+        <table className="w-full border-collapse border border-slate-400 text-xs">
+          <thead>
+            <tr className="bg-slate-100 text-black border-b border-slate-400">
+              <th className="p-2 border border-slate-300 text-center w-10">ลำดับ</th>
+              <th className="p-2 border border-slate-300 text-left">รายละเอียดแปลงที่ดิน</th>
+              <th className="p-2 border border-slate-300 text-left">ทำเล (ตำบล/อำเภอ/จังหวัด)</th>
+              <th className="p-2 border border-slate-300 text-center">ประเภท</th>
+              <th className="p-2 border border-slate-300 text-right">เนื้อที่</th>
+              <th className="p-2 border border-slate-300 text-right">ราคาซื้อ (บาท)</th>
+              <th className="p-2 border border-slate-300 text-right">ค่าใช้จ่ายอื่น</th>
+              <th className="p-2 border border-slate-300 text-right">ต้นทุนรวม (บาท)</th>
+              <th className="p-2 border border-slate-300 text-right">ภาษีที่ดิน/ปี</th>
+              <th className="p-2 border border-slate-300 text-right">ราคาเป้า/ขายจริง</th>
+              <th className="p-2 border border-slate-300 text-center">สถานะ</th>
+            </tr>
+          </thead>
+          <tbody>
+            {printPlots.map((plot, idx) => {
+              const otherCost = (Number(plot.taxAndFees) || 0) + (Number(plot.surveyCost) || 0) + (Number(plot.otherExpenses) || 0);
+              const targetOrSold = plot.status === 'sold' ? (Number(plot.soldPrice) || 0) : (Number(plot.targetSalePrice) || 0);
+              const tax = getPlotLandTax(plot);
+              return (
+                <tr key={plot.id} className="border-b border-slate-300 hover:bg-slate-50">
+                  <td className="p-2 border border-slate-300 text-center font-mono font-semibold">
+                    {plot.orderNumber || idx + 1}
+                  </td>
+                  <td className="p-2 border border-slate-300">
+                    <div className="font-semibold text-black">{plot.title}</div>
+                    {plot.primaryDeedNumber && (
+                      <div className="text-[10px] text-slate-600 font-mono">โฉนด: {plot.primaryDeedNumber}</div>
+                    )}
+                  </td>
+                  <td className="p-2 border border-slate-300 text-slate-800">
+                    {plot.subdistrict || '-'}, {plot.district || '-'}, {plot.province || '-'}
+                  </td>
+                  <td className="p-2 border border-slate-300 text-center text-[11px]">
+                    {plot.landType || '-'}
+                  </td>
+                  <td className="p-2 border border-slate-300 text-right font-mono">
+                    {formatThaiArea(plot.rai, plot.ngan, plot.sqWah)}
+                  </td>
+                  <td className="p-2 border border-slate-300 text-right font-mono">
+                    {formatCurrency(plot.purchasePrice)}
+                  </td>
+                  <td className="p-2 border border-slate-300 text-right font-mono text-slate-700">
+                    {formatCurrency(otherCost)}
+                  </td>
+                  <td className="p-2 border border-slate-300 text-right font-mono font-semibold">
+                    {formatCurrency(plot.totalCost)}
+                  </td>
+                  <td className="p-2 border border-slate-300 text-right font-mono">
+                    <span className={tax.annualTax > 0 ? "font-semibold text-rose-800" : "text-emerald-800"}>
+                      {formatCurrency(tax.annualTax)}
+                    </span>
+                    <div className="text-[9px] text-slate-500">
+                      {TAX_USAGE_CONFIGS[tax.usageType]?.shortLabel || tax.usageType} ({tax.effectiveRatePercent.toFixed(2)}%)
+                    </div>
+                  </td>
+                  <td className="p-2 border border-slate-300 text-right font-mono font-semibold">
+                    {formatCurrency(targetOrSold)}
+                  </td>
+                  <td className="p-2 border border-slate-300 text-center font-semibold text-[11px]">
+                    {plot.status === 'holding' && 'ถือครอง'}
+                    {plot.status === 'for_sale' && 'ประกาศขาย'}
+                    {plot.status === 'consignment' && 'ขายฝาก'}
+                    {plot.status === 'sold' && 'ขายแล้ว'}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+          <tfoot>
+            <tr className="bg-slate-100 font-bold border-t-2 border-slate-900">
+              <td colSpan={4} className="p-2 border border-slate-300 text-center">
+                รวมทั้งสิ้น ({printTotals.totalPlots} แปลง)
+              </td>
+              <td className="p-2 border border-slate-300 text-right font-mono">
+                {formatThaiArea(printTotals.totalSqWah)}
+              </td>
+              <td className="p-2 border border-slate-300 text-right font-mono">
+                {formatCurrency(printTotals.totalPurchase)}
+              </td>
+              <td className="p-2 border border-slate-300 text-right font-mono">
+                {formatCurrency(printTotals.totalFees)}
+              </td>
+              <td className="p-2 border border-slate-300 text-right font-mono text-black">
+                {formatCurrency(printTotals.totalCost)}
+              </td>
+              <td className="p-2 border border-slate-300 text-right font-mono font-bold text-rose-800">
+                {formatCurrency(printTotals.totalAnnualLandTax)}
+              </td>
+              <td className="p-2 border border-slate-300 text-right font-mono text-black">
+                {formatCurrency(printTotals.totalTargetOrSold)}
+              </td>
+              <td className="p-2 border border-slate-300 text-center">-</td>
+            </tr>
+          </tfoot>
+        </table>
+
+        {/* Signature & Verification Block */}
+        <div className="mt-12 grid grid-cols-2 gap-12 pt-6 border-t border-slate-300 text-xs">
+          <div className="text-center space-y-10">
+            <p className="font-semibold text-slate-800">ผู้จัดทำรายงาน (Prepared By)</p>
+            <div className="border-b border-slate-400 w-48 mx-auto"></div>
+            <p className="text-slate-600">วันที่: ..... / ..... / ..........</p>
+          </div>
+          <div className="text-center space-y-10">
+            <p className="font-semibold text-slate-800">ผู้ตรวจสอบ / เจ้าของพอร์ต (Approved By)</p>
+            <div className="border-b border-slate-400 w-48 mx-auto"></div>
+            <p className="text-slate-600">วันที่: ..... / ..... / ..........</p>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
+

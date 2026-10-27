@@ -8,6 +8,7 @@ export const DEFAULT_SETTINGS: PortfolioSettings = {
   expectedHoldingPeriodMonths: 12,
   currency: 'บาท',
   fontSize: 'base',
+  theme: 'dark',
 };
 
 export const INITIAL_LAND_PLOTS: LandPlot[] = [

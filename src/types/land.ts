@@ -11,12 +11,33 @@ export interface SubParcel {
   notes?: string;
 }
 
+export type DocumentChecklistCategory =
+  | 'deed'         // โฉนดที่ดิน / น.ส. 4 จ. / น.ส. 3 ก.
+  | 'tax_receipt'  // ใบเสร็จภาษีที่ดิน / ค่าธรรมเนียม
+  | 'survey_map'   // แผนที่รังวัด / ระวางที่ดิน
+  | 'contract'     // สัญญาจะซื้อจะขาย / บันทึกมัดจำ
+  | 'appraisal'    // ใบประเมินราคา / ราคาประเมินธนารักษ์
+  | 'id_doc';      // สำเนาบัตรประชาชน / ทะเบียนบ้าน
+
+export interface DocumentChecklistItemState {
+  hasPhysicalHardCopy?: boolean;
+  verified?: boolean;
+  note?: string;
+  updatedAt?: string;
+}
+
+export type DocumentChecklistRecord = Record<string, DocumentChecklistItemState>;
+
 export interface LandPlotImage {
   id: string;
   url: string; // Data URL or cloud URL
   title: string;
-  type: 'deed' | 'photo' | 'cadastral' | 'contract' | 'other';
+  type: 'deed' | 'photo' | 'cadastral' | 'contract' | 'tax_receipt' | 'appraisal' | 'other';
   uploadedAt: string;
+  category?: DocumentChecklistCategory;
+  driveFileId?: string;
+  driveWebViewLink?: string;
+  driveThumbnailLink?: string;
 }
 
 export type LandStatus = 'holding' | 'for_sale' | 'sold' | 'consignment'; // ถือครอง, กำลังประกาศขาย, ขายแล้ว, ขายฝาก
@@ -61,12 +82,29 @@ export interface LandPlot {
   commissionFee: number; // ค่าคอมมิชชั่น
   netReceived: number; // สุทธิที่ได้รับ
   
+  // Land and Building Tax Act B.E. 2562 (ภาษีที่ดินและสิ่งปลูกสร้าง)
+  appraisalPrice?: number; // ราคาประเมินทุนทรัพย์ที่ดิน (บาท)
+  taxUsageType?: LandTaxUsageType; // ประเภทการใช้ประโยชน์ตามกฎหมาย
+  isIndividualOwner?: boolean; // เจ้าของในนามบุคคลธรรมดา (ได้รับยกเว้น 50 ล้านแรก)
+  vacantConsecutiveYears?: number; // ปีที่ทิ้งว่างเปล่าติดต่อกัน (กรณีที่ดินรกร้าง)
+  annualLandTax?: number; // ภาษีที่ดินและสิ่งปลูกสร้างต่อปี (บาท)
+
   status: LandStatus;
   notes: string; // หมายเหตุเพิ่มเติม
   quickNotes?: QuickNoteItem[]; // บันทึกด่วน & ข้อสังเกตชั่วคราว
   images?: LandPlotImage[];
+  documentChecklist?: DocumentChecklistRecord;
+  driveFolderId?: string; // Google Drive folder ID for this specific plot
+  driveFolderWebViewLink?: string; // Web URL to open the Google Drive folder directly
   updatedAt: string;
 }
+
+export type LandTaxUsageType = 
+  | 'agricultural' // เกษตรกรรม (0.01% - ยกเว้น 50 ล้านแรก)
+  | 'residential_primary' // ที่อยู่อาศัยหลังหลัก (ยกเว้น 50 ล้านแรก)
+  | 'residential_other' // ที่อยู่อาศัยหลังอื่น / ปล่อยเช่า (0.02% เริ่มต้น)
+  | 'commercial' // พาณิชยกรรม / อุตสาหกรรม / อื่นๆ (0.30% เริ่มต้น)
+  | 'vacant'; // รกร้างว่างเปล่า / ไม่ได้ทำประโยชน์ (0.30% + ปรับเพิ่มทุก 3 ปี)
 
 export type QuickNoteTag = 'observation' | 'reminder' | 'agent' | 'urgent' | 'visit' | 'general';
 
@@ -89,6 +127,7 @@ export interface PortfolioSettings {
   lastSyncedAt?: string;
   currency: string;
   fontSize?: AppFontSize;
+  theme?: 'dark' | 'light';
 }
 
 export interface KPIStats {

@@ -9,10 +9,13 @@ import {
   Check, 
   Sparkles, 
   ArrowRight,
-  Info
+  Info,
+  Receipt,
+  Scale
 } from 'lucide-react';
 import { LandPlot, PortfolioSettings } from '../types/land';
 import { formatCurrency, formatThaiArea } from '../services/storage';
+import { getPlotLandTax, TAX_USAGE_CONFIGS } from '../services/landTax';
 
 interface KPISimulatorProps {
   plots: LandPlot[];
@@ -30,9 +33,15 @@ export const KPISimulator: React.FC<KPISimulatorProps> = ({
   const [targetMarginPercent, setTargetMarginPercent] = useState<number>(35); // 35% margin
   const [commissionRate, setCommissionRate] = useState<number>(settings.defaultCommissionRate || 3);
   const [taxRate, setTaxRate] = useState<number>(settings.defaultTaxRate || 2);
+  const [includeLandTax, setIncludeLandTax] = useState<boolean>(true);
+  const [holdingPeriodMonths, setHoldingPeriodMonths] = useState<number>(settings.expectedHoldingPeriodMonths || 12);
   const [savedSuccess, setSavedSuccess] = useState(false);
 
   const selectedPlot = plots.find((p) => p.id === selectedPlotId) || activePlots[0] || plots[0];
+
+  // Land and Building Tax calculation
+  const plotLandTax = selectedPlot ? getPlotLandTax(selectedPlot, holdingPeriodMonths) : null;
+  const accruedLandTax = (includeLandTax && plotLandTax) ? plotLandTax.accruedTaxForPeriod : 0;
 
   // Simulator calculations
   const totalCost = selectedPlot?.totalCost || 0;
@@ -43,7 +52,7 @@ export const KPISimulator: React.FC<KPISimulatorProps> = ({
   const simulatedSellingPrice = Math.round(totalCost * (1 + targetMarginPercent / 100));
   const estimatedCommission = Math.round(simulatedSellingPrice * (commissionRate / 100));
   const estimatedTax = Math.round(simulatedSellingPrice * (taxRate / 100));
-  const netProceeds = simulatedSellingPrice - estimatedCommission - estimatedTax;
+  const netProceeds = simulatedSellingPrice - estimatedCommission - estimatedTax - accruedLandTax;
   const netProfit = netProceeds - totalCost;
   const netROI = totalCost > 0 ? (netProfit / totalCost) * 100 : 0;
 
@@ -240,6 +249,71 @@ export const KPISimulator: React.FC<KPISimulatorProps> = ({
                 <span>4%</span>
               </div>
             </div>
+
+            {/* Land and Building Tax Act B.E. 2562 Holding Cost Control */}
+            <div className="space-y-3 pt-3 border-t border-slate-800">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-rose-300 font-semibold flex items-center gap-1.5">
+                  <Receipt className="w-3.5 h-3.5 text-rose-400" />
+                  ภาษีที่ดินและสิ่งปลูกสร้าง (พ.ร.บ. 2562):
+                </span>
+                <label className="flex items-center gap-1.5 cursor-pointer text-xs">
+                  <input
+                    type="checkbox"
+                    checked={includeLandTax}
+                    onChange={(e) => setIncludeLandTax(e.target.checked)}
+                    className="w-4 h-4 rounded text-rose-500 bg-slate-800 border-slate-700"
+                  />
+                  <span className="text-slate-300 font-medium">คำนวณหักในกำไร</span>
+                </label>
+              </div>
+
+              {plotLandTax && (
+                <div className="p-3 rounded-xl bg-slate-950/60 border border-rose-500/20 space-y-2 text-xs">
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-400">ประเภทการใช้ประโยชน์:</span>
+                    <span className="font-semibold text-slate-200">
+                      {TAX_USAGE_CONFIGS[plotLandTax.usageType].shortLabel}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-400">ภาษีประเมินต่อปี:</span>
+                    <span className="font-mono font-bold text-rose-300">
+                      {plotLandTax.annualTax === 0 ? '0 ฿ (ยกเว้น 50 ล้านแรก)' : `${formatCurrency(plotLandTax.annualTax)} / ปี`}
+                    </span>
+                  </div>
+
+                  <div className="pt-2 border-t border-slate-800/80 space-y-1.5">
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-slate-400">ระยะเวลาถือครองจำลอง:</span>
+                      <span className="font-mono text-emerald-400 font-semibold">{holdingPeriodMonths} เดือน</span>
+                    </div>
+                    <div className="grid grid-cols-5 gap-1 pt-1">
+                      {[6, 12, 18, 24, 36].map((m) => (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => setHoldingPeriodMonths(m)}
+                          className={`py-1 rounded text-center text-[10px] font-mono transition-colors cursor-pointer ${
+                            holdingPeriodMonths === m
+                              ? 'bg-rose-500 text-white font-bold'
+                              : 'bg-slate-800 text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          {m} ด.
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex justify-between items-center text-[11px] pt-1 text-slate-400">
+                      <span>ภาษีที่ดินสะสมตามระยะถือครอง:</span>
+                      <span className="font-mono font-bold text-rose-300">
+                        {formatCurrency(plotLandTax.accruedTaxForPeriod)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -306,6 +380,16 @@ export const KPISimulator: React.FC<KPISimulatorProps> = ({
                 <span>หัก ประมาณการค่าภาษี/ค่าโอน ({taxRate}%):</span>
                 <span className="font-mono font-medium">-{formatCurrency(estimatedTax)}</span>
               </div>
+
+              {includeLandTax && accruedLandTax > 0 && (
+                <div className="flex justify-between items-center text-xs py-1.5 border-b border-slate-800/60 text-rose-300">
+                  <span className="flex items-center gap-1">
+                    <Receipt className="w-3.5 h-3.5 text-rose-400" />
+                    หัก ภาษีที่ดินและสิ่งปลูกสร้างสะสม ({holdingPeriodMonths} เดือน):
+                  </span>
+                  <span className="font-mono font-medium">-{formatCurrency(accruedLandTax)}</span>
+                </div>
+              )}
 
               <div className="flex justify-between items-center text-xs py-1.5 border-b border-slate-800/60 text-slate-300">
                 <span>ยอดเงินสุทธิที่ได้รับหลังหักค่าใช้จ่าย:</span>

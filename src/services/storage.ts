@@ -1,5 +1,13 @@
 import { LandPlot, PortfolioSettings, KPIStats } from '../types/land';
 import { INITIAL_LAND_PLOTS, DEFAULT_SETTINGS } from '../data/defaultLandData';
+import { 
+  savePlotsToIndexedDB, 
+  loadPlotsFromIndexedDB, 
+  saveSettingsToIndexedDB, 
+  loadSettingsFromIndexedDB 
+} from './dbStorage';
+
+export { savePlotsToIndexedDB, loadPlotsFromIndexedDB, saveSettingsToIndexedDB, loadSettingsFromIndexedDB };
 
 const PLOTS_STORAGE_KEY = 'land_portfolio_plots_v1';
 const SETTINGS_STORAGE_KEY = 'land_portfolio_settings_v1';
@@ -31,11 +39,16 @@ export const loadPlotsFromStorage = (): LandPlot[] => {
 };
 
 export const savePlotsToStorage = (plots: LandPlot[]) => {
+  // 1. Immediately persist full plots with all deed images into IndexedDB (no quota limit)
+  savePlotsToIndexedDB(plots).catch((err) => {
+    console.warn('Background IndexedDB save encountered an issue:', err);
+  });
+
+  // 2. Synchronize with localStorage
   try {
     localStorage.setItem(PLOTS_STORAGE_KEY, JSON.stringify(plots));
   } catch (e: any) {
-    console.error('Failed to save plots to local storage (quota reached?):', e);
-    // If quota exceeded, sanitize heavy base64 strings so critical plot business data is never lost
+    console.warn('LocalStorage 5MB quota exceeded, storing sanitized image metadata in localStorage (full images are safely retained in IndexedDB):', e);
     try {
       const sanitized = plots.map((p) => ({
         ...p,
@@ -70,6 +83,7 @@ export const loadSettingsFromStorage = (): PortfolioSettings => {
 };
 
 export const saveSettingsToStorage = (settings: PortfolioSettings) => {
+  saveSettingsToIndexedDB(settings).catch(() => {});
   try {
     localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
   } catch (e) {
@@ -78,6 +92,8 @@ export const saveSettingsToStorage = (settings: PortfolioSettings) => {
 };
 
 export const resetDataToDefault = (): { plots: LandPlot[]; settings: PortfolioSettings } => {
+  savePlotsToIndexedDB(INITIAL_LAND_PLOTS).catch(() => {});
+  saveSettingsToIndexedDB(DEFAULT_SETTINGS).catch(() => {});
   savePlotsToStorage(INITIAL_LAND_PLOTS);
   saveSettingsToStorage(DEFAULT_SETTINGS);
   return { plots: INITIAL_LAND_PLOTS, settings: DEFAULT_SETTINGS };
@@ -258,13 +274,33 @@ export const calculateKPIs = (plots: LandPlot[]): KPIStats => {
 };
 
 /**
- * Format Thai land area helper: e.g. 5 ไร่ 0 งาน 54 ตร.ว.
+ * Format Thai land area helper: accepts either (rai, ngan, sqWah) or single totalSqWah
+ * e.g. 5 ไร่ 0 งาน 54 ตร.ว.
  */
-export const formatThaiArea = (rai: number, ngan: number, sqWah: number): string => {
+export const formatThaiArea = (
+  raiOrTotalSqWah: number,
+  ngan?: number,
+  sqWah?: number
+): string => {
+  if (ngan === undefined && sqWah === undefined) {
+    const total = Number(raiOrTotalSqWah) || 0;
+    const r = Math.floor(total / 400);
+    const rem = total % 400;
+    const ng = Math.floor(rem / 100);
+    const sw = Math.round((rem % 100) * 10) / 10;
+    const parts = [];
+    if (r > 0) parts.push(`${r} ไร่`);
+    if (ng > 0) parts.push(`${ng} งาน`);
+    if (sw > 0 || parts.length === 0) parts.push(`${sw} ตร.ว.`);
+    return parts.join(' ');
+  }
+  const r = Number(raiOrTotalSqWah) || 0;
+  const ng = Number(ngan) || 0;
+  const sw = Number(sqWah) || 0;
   const parts = [];
-  if (rai > 0) parts.push(`${rai} ไร่`);
-  if (ngan > 0) parts.push(`${ngan} งาน`);
-  if (sqWah > 0 || parts.length === 0) parts.push(`${sqWah} ตร.ว.`);
+  if (r > 0) parts.push(`${r} ไร่`);
+  if (ng > 0) parts.push(`${ng} งาน`);
+  if (sw > 0 || parts.length === 0) parts.push(`${sw} ตร.ว.`);
   return parts.join(' ');
 };
 

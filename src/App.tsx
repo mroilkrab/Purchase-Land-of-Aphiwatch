@@ -7,7 +7,9 @@ import {
   saveSettingsToStorage, 
   resetDataToDefault, 
   calculateKPIs,
-  exportToCsvFile
+  exportToCsvFile,
+  loadPlotsFromIndexedDB,
+  loadSettingsFromIndexedDB
 } from './services/storage';
 import { initAuth, googleSignIn, logoutGoogle, getAccessToken } from './services/firebaseAuth';
 import { createGoogleSheet, updateExistingGoogleSheet } from './services/googleSheets';
@@ -27,7 +29,7 @@ import { CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
 export default function App() {
   const [plots, setPlots] = useState<LandPlot[]>(() => loadPlotsFromStorage());
   const [settings, setSettings] = useState<PortfolioSettings>(() => loadSettingsFromStorage());
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'table' | 'map' | 'reports' | 'simulator' | 'artifact' | 'settings'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'table' | 'map' | 'reports' | 'simulator' | 'artifact' | 'settings'>('table');
 
   // Modals state
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -39,6 +41,49 @@ export default function App() {
   // Auth state
   const [user, setUser] = useState<User | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Hydrate full data with unstripped images from IndexedDB on startup
+  useEffect(() => {
+    let isMounted = true;
+    loadPlotsFromIndexedDB().then((dbPlots) => {
+      if (isMounted && dbPlots && dbPlots.length > 0) {
+        setPlots(dbPlots);
+      }
+    }).catch((err) => {
+      console.warn('Initial IndexedDB plots hydration note:', err);
+    });
+
+    loadSettingsFromIndexedDB().then((dbSettings) => {
+      if (isMounted && dbSettings) {
+        setSettings((prev) => ({ ...prev, ...dbSettings }));
+      }
+    }).catch(() => {});
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Theme synchronization
+  useEffect(() => {
+    const currentTheme = settings.theme || 'dark';
+    document.documentElement.setAttribute('data-theme', currentTheme);
+    if (currentTheme === 'light') {
+      document.documentElement.classList.add('light');
+      document.documentElement.classList.remove('dark');
+    } else {
+      document.documentElement.classList.add('dark');
+      document.documentElement.classList.remove('light');
+    }
+  }, [settings.theme]);
+
+  const handleToggleTheme = () => {
+    const nextTheme: 'dark' | 'light' = settings.theme === 'light' ? 'dark' : 'light';
+    const updated: PortfolioSettings = { ...settings, theme: nextTheme };
+    setSettings(updated);
+    saveSettingsToStorage(updated);
+    showToast(nextTheme === 'light' ? '☀️ เปิดใช้งานโหมดสว่าง (Light Mode)' : '🌙 เปิดใช้งานโหมดมืด (Dark Mode)');
+  };
 
   // Google Sheet Sync State
   const [isSyncingSheet, setIsSyncingSheet] = useState(false);
@@ -109,8 +154,27 @@ export default function App() {
       let spreadsheetUrl = '';
 
       if (currentSheetId) {
-        const res = await updateExistingGoogleSheet(token, currentSheetId, currentPlots, settings);
-        spreadsheetUrl = res.spreadsheetUrl;
+        try {
+          const res = await updateExistingGoogleSheet(token, currentSheetId, currentPlots, settings);
+          spreadsheetUrl = res.spreadsheetUrl;
+        } catch (updateErr: any) {
+          console.warn('Update existing sheet failed, attempting fallback create:', updateErr);
+          if (
+            updateErr.message?.includes('404') ||
+            updateErr.message?.includes('not found') ||
+            updateErr.message?.includes('400') ||
+            updateErr.message?.includes('Unable to parse range')
+          ) {
+            const res = await createGoogleSheet(token, currentPlots, settings);
+            currentSheetId = res.spreadsheetId;
+            spreadsheetUrl = res.spreadsheetUrl;
+            const newSettings = { ...settings, googleSheetId: currentSheetId };
+            setSettings(newSettings);
+            saveSettingsToStorage(newSettings);
+          } else {
+            throw updateErr;
+          }
+        }
       } else {
         const res = await createGoogleSheet(token, currentPlots, settings);
         currentSheetId = res.spreadsheetId;
@@ -286,7 +350,7 @@ export default function App() {
   const nextOrderNumber = Math.max(...plots.map((p) => p.orderNumber || 0), 0) + 1;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-['Prompt',sans-serif] overflow-x-hidden max-w-full">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-['Prompt',sans-serif] overflow-x-hidden max-w-full app-container transition-colors duration-200">
       {/* Navigation Bar */}
       <Navbar
         activeTab={activeTab}
@@ -301,6 +365,8 @@ export default function App() {
         settings={settings}
         fontSize={settings.fontSize || 'base'}
         onFontSizeChange={handleFontSizeChange}
+        theme={settings.theme || 'dark'}
+        onToggleTheme={handleToggleTheme}
       />
 
       {/* Main Content Area */}
@@ -350,6 +416,7 @@ export default function App() {
             googleSheetId={settings.googleSheetId}
             isGoogleAuthed={!!user}
             onLoginGoogle={handleLogin}
+            settings={settings}
           />
         )}
 
@@ -397,6 +464,7 @@ export default function App() {
             onImportPlots={handleImportPlots}
             user={user}
             onLoginGoogle={handleLogin}
+            onNavigateToTable={() => setActiveTab('table')}
           />
         )}
       </main>
@@ -412,6 +480,11 @@ export default function App() {
         onDelete={handleDeletePlot}
         initialData={editingPlot}
         nextOrderNumber={nextOrderNumber}
+        isGoogleAuthed={!!user}
+        googleSheetId={settings.googleSheetId}
+        onLoginGoogle={handleLogin}
+        isSyncingSheet={isSyncingSheet}
+        sheetSyncStatus={sheetSyncStatus}
       />
 
       {/* Detail Modal */}
@@ -430,7 +503,10 @@ export default function App() {
           setSelectedPlotForDetail(null);
           setActiveTab('simulator');
         }}
+        onUpdatePlot={handleSavePlot}
         settings={settings}
+        user={user}
+        onLoginGoogle={handleLogin}
       />
 
       {/* Toast Notification */}

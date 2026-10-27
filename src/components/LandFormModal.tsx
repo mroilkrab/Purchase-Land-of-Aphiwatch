@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   X, 
   Save, 
@@ -12,10 +12,21 @@ import {
   Calculator, 
   Image as ImageIcon,
   Check,
-  AlertCircle
+  AlertCircle,
+  Loader2,
+  FileSpreadsheet,
+  CheckCircle2,
+  Printer,
+  ExternalLink,
+  RefreshCw,
+  Scale,
+  ShieldCheck,
+  Receipt
 } from 'lucide-react';
-import { LandPlot, SubParcel, LandPlotImage, LandStatus } from '../types/land';
-import { formatThaiArea } from '../services/storage';
+import { LandPlot, SubParcel, LandPlotImage, LandStatus, LandTaxUsageType } from '../types/land';
+import { formatThaiArea, formatCurrency } from '../services/storage';
+import { compressImageForStorage } from '../services/dbStorage';
+import { calculateLandTax, inferDefaultTaxUsage, TAX_USAGE_CONFIGS } from '../services/landTax';
 
 interface LandFormModalProps {
   isOpen: boolean;
@@ -24,6 +35,16 @@ interface LandFormModalProps {
   onDelete?: (plotId: string) => void;
   initialData?: LandPlot | null;
   nextOrderNumber: number;
+  isGoogleAuthed?: boolean;
+  googleSheetId?: string;
+  onLoginGoogle?: () => void;
+  isSyncingSheet?: boolean;
+  sheetSyncStatus?: {
+    status: 'idle' | 'syncing' | 'success' | 'error';
+    message: string;
+    sheetUrl?: string;
+    lastSynced?: string;
+  };
 }
 
 export const LandFormModal: React.FC<LandFormModalProps> = ({
@@ -33,8 +54,14 @@ export const LandFormModal: React.FC<LandFormModalProps> = ({
   onDelete,
   initialData,
   nextOrderNumber,
+  isGoogleAuthed = false,
+  googleSheetId,
+  onLoginGoogle,
+  isSyncingSheet = false,
+  sheetSyncStatus,
 }) => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [autoSyncSheet, setAutoSyncSheet] = useState<boolean>(true);
   const [formData, setFormData] = useState<Partial<LandPlot>>({
     orderNumber: nextOrderNumber,
     purchaseDate: '',
@@ -182,31 +209,29 @@ export const LandFormModal: React.FC<LandFormModalProps> = ({
     });
   };
 
-  // Image Upload handler
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Image Upload handler with image compression to prevent memory overflow
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
-    Array.from(files).forEach((file) => {
-      const reader = new FileReader();
-      reader.onload = (uploadEvent) => {
-        const url = uploadEvent.target?.result as string;
-        if (url) {
-          const newImage: LandPlotImage = {
-            id: `img-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-            url,
-            title: file.name.replace(/\.[^/.]+$/, ''),
-            type: 'deed',
-            uploadedAt: new Date().toISOString(),
-          };
-          setFormData((prev) => ({
-            ...prev,
-            images: [...(prev.images || []), newImage],
-          }));
-        }
-      };
-      reader.readAsDataURL(file);
-    });
+    for (const file of Array.from(files)) {
+      try {
+        const compressedUrl = await compressImageForStorage(file, 1600, 0.82);
+        const newImage: LandPlotImage = {
+          id: `img-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+          url: compressedUrl,
+          title: file.name.replace(/\.[^/.]+$/, ''),
+          type: 'deed',
+          uploadedAt: new Date().toISOString(),
+        };
+        setFormData((prev) => ({
+          ...prev,
+          images: [...(prev.images || []), newImage],
+        }));
+      } catch (err) {
+        console.warn('Image processing error:', err);
+      }
+    }
   };
 
   const handleImageDelete = (imgId: string) => {
@@ -216,6 +241,24 @@ export const LandFormModal: React.FC<LandFormModalProps> = ({
     }));
   };
 
+  // Live Land and Building Tax Calculation for this plot
+  const liveTaxResult = useMemo(() => {
+    const appraisal = Number(formData.appraisalPrice) > 0 
+      ? Number(formData.appraisalPrice) 
+      : (Number(formData.purchasePrice) || 0);
+    const usageType = formData.taxUsageType || inferDefaultTaxUsage(formData.landType);
+    const isIndividual = formData.isIndividualOwner !== false;
+    const vacantYears = Number(formData.vacantConsecutiveYears) || 0;
+
+    return calculateLandTax({
+      appraisalPrice: appraisal,
+      usageType,
+      isIndividualOwner: isIndividual,
+      vacantYears,
+      monthsHeld: 12,
+    });
+  }, [formData.appraisalPrice, formData.purchasePrice, formData.taxUsageType, formData.landType, formData.isIndividualOwner, formData.vacantConsecutiveYears]);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.title?.trim()) {
@@ -224,10 +267,22 @@ export const LandFormModal: React.FC<LandFormModalProps> = ({
     }
     setFormError(null);
 
+    const appraisal = Number(formData.appraisalPrice) > 0 
+      ? Number(formData.appraisalPrice) 
+      : (Number(formData.purchasePrice) || 0);
+    const usageType = formData.taxUsageType || inferDefaultTaxUsage(formData.landType);
+    const isIndividual = formData.isIndividualOwner !== false;
+    const vacantYears = Number(formData.vacantConsecutiveYears) || 0;
+
     const finalPlot: LandPlot = {
       ...(formData as LandPlot),
       id: formData.id || `plot-${Date.now()}`,
       orderNumber: Number(formData.orderNumber) || nextOrderNumber,
+      appraisalPrice: appraisal,
+      taxUsageType: usageType,
+      isIndividualOwner: isIndividual,
+      vacantConsecutiveYears: vacantYears,
+      annualLandTax: liveTaxResult.annualTax,
       updatedAt: new Date().toISOString(),
     };
 
@@ -235,7 +290,7 @@ export const LandFormModal: React.FC<LandFormModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm overflow-y-auto">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm overflow-y-auto">
       <div className="relative w-full max-w-4xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden my-8 max-h-[90vh] flex flex-col">
         {/* Modal Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-800/60 sticky top-0 z-20">
@@ -261,6 +316,55 @@ export const LandFormModal: React.FC<LandFormModalProps> = ({
               <span>{formError}</span>
             </div>
           )}
+
+          {/* Google Sheets Auto-Sync Notification Card */}
+          <div className="p-3.5 rounded-xl bg-slate-800/80 border border-slate-700/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+            <div className="flex items-start sm:items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-500/20">
+                <FileSpreadsheet className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-slate-200">
+                    {isGoogleAuthed ? 'Google Sheets Auto-Sync: พร้อมใช้งาน' : 'บันทึกเข้าสู่ Google Sheets อัตโนมัติ'}
+                  </span>
+                  {isGoogleAuthed && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 font-mono text-[10px] font-semibold border border-emerald-500/30">
+                      <CheckCircle2 className="w-3 h-3" /> เชื่อมต่อแล้ว
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  {isGoogleAuthed
+                    ? 'เมื่อกดยืนยันบันทึก ระบบจะจัดเก็บข้อมูลลงตารางในระบบ และอัพเดตเข้าตาราง Google Sheets ของคุณทันที'
+                    : 'เข้าสู่ระบบ Google เพื่อให้อัพเดตข้อมูลเข้า Google Sheets แบบเรียลไทม์เมื่อมีการเพิ่มหรือแก้ไขแปลง'}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              {isGoogleAuthed && googleSheetId && (
+                <a
+                  href={`https://docs.google.com/spreadsheets/d/${googleSheetId}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-400 hover:text-emerald-300 border border-slate-700 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>เปิด Google Sheet</span>
+                </a>
+              )}
+              {!isGoogleAuthed && onLoginGoogle && (
+                <button
+                  type="button"
+                  onClick={onLoginGoogle}
+                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-sm transition-colors cursor-pointer"
+                >
+                  เข้าสู่ระบบ Google
+                </button>
+              )}
+            </div>
+          </div>
 
           {/* Section 1: Basic Information */}
           <div className="space-y-4">
@@ -620,10 +724,144 @@ export const LandFormModal: React.FC<LandFormModalProps> = ({
             </div>
           </div>
 
-          {/* Section 4: Sales, Target Selling Price (KPI) & Status */}
+          {/* Section 4: Land and Building Tax Act B.E. 2562 */}
+          <div className="space-y-4 pt-4 border-t border-slate-800">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-rose-400 flex items-center gap-2">
+                <Receipt className="w-4 h-4" /> 4. ภาษีที่ดินและสิ่งปลูกสร้าง (พ.ร.บ. ภาษีที่ดินฯ พ.ศ. 2562)
+              </h3>
+              <span className="text-[11px] text-slate-400 font-medium flex items-center gap-1">
+                <Scale className="w-3.5 h-3.5 text-slate-400" />
+                คำนวณอัตโนมัติตามราคาประเมินและประเภทการใช้ประโยชน์
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
+              {/* Appraisal Price Input */}
+              <div className="sm:col-span-5">
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs text-slate-400">ราคาประเมินทุนทรัพย์ที่ดิน (บาท)</label>
+                  {Number(formData.purchasePrice) > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setFormData({ ...formData, appraisalPrice: Number(formData.purchasePrice) })}
+                      className="text-[10px] text-emerald-400 hover:text-emerald-300 font-medium underline cursor-pointer"
+                    >
+                      ใช้ราคาซื้อ
+                    </button>
+                  )}
+                </div>
+                <input
+                  type="number"
+                  min="0"
+                  placeholder={formData.purchasePrice ? String(formData.purchasePrice) : 'เช่น 1,500,000'}
+                  value={formData.appraisalPrice ?? ''}
+                  onChange={(e) => setFormData({ ...formData, appraisalPrice: e.target.value === '' ? undefined : Number(e.target.value) })}
+                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-slate-200 focus:outline-none focus:border-rose-500 font-mono font-semibold"
+                />
+                <span className="text-[10px] text-slate-500 mt-1 block">
+                  หากไม่ระบุ ระบบจะใช้ราคาซื้อเป็นฐานประเมินในการคำนวณภาษี
+                </span>
+              </div>
+
+              {/* Tax Usage Type Dropdown */}
+              <div className="sm:col-span-4">
+                <label className="block text-xs text-slate-400 mb-1">ประเภทการใช้ประโยชน์ตามกฎหมาย *</label>
+                <select
+                  value={formData.taxUsageType || inferDefaultTaxUsage(formData.landType)}
+                  onChange={(e) => setFormData({ ...formData, taxUsageType: e.target.value as LandTaxUsageType })}
+                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-slate-200 focus:outline-none focus:border-rose-500 cursor-pointer font-medium"
+                >
+                  <option value="agricultural">เกษตรกรรม (0.01% - ยกเว้น 50 ล้านแรก)</option>
+                  <option value="residential_primary">ที่อยู่อาศัยหลังหลัก (ยกเว้น 50 ล้านแรก)</option>
+                  <option value="residential_other">ที่อยู่อาศัยหลังอื่น / ปล่อยเช่า (0.02% เริ่มต้น)</option>
+                  <option value="commercial">พาณิชยกรรม / อื่นๆ (0.30% เริ่มต้น)</option>
+                  <option value="vacant">ที่ดินรกร้างว่างเปล่า (0.30% + เพิ่มทุก 3 ปี)</option>
+                </select>
+              </div>
+
+              {/* Individual Owner Checkbox */}
+              <div className="sm:col-span-3 flex sm:flex-col justify-end">
+                <label className="flex items-center gap-2 p-2 rounded-lg bg-slate-800/80 border border-slate-700 cursor-pointer text-xs select-none">
+                  <input
+                    type="checkbox"
+                    checked={formData.isIndividualOwner !== false}
+                    onChange={(e) => setFormData({ ...formData, isIndividualOwner: e.target.checked })}
+                    className="w-4 h-4 rounded text-rose-500 bg-slate-700 border-slate-600 focus:ring-rose-500"
+                  />
+                  <div>
+                    <span className="text-slate-200 font-medium block">บุคคลธรรมดา</span>
+                    <span className="text-[10px] text-slate-400 block">รับสิทธิยกเว้น 50 ล้าน</span>
+                  </div>
+                </label>
+              </div>
+
+              {/* Vacant consecutive years (only if vacant) */}
+              {(formData.taxUsageType === 'vacant' || (!formData.taxUsageType && inferDefaultTaxUsage(formData.landType) === 'vacant')) && (
+                <div className="sm:col-span-12 p-2.5 rounded-lg bg-rose-950/30 border border-rose-800/40 flex items-center justify-between gap-3 text-xs">
+                  <div className="flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                    <span className="text-rose-200">
+                      ที่ดินทิ้งไว้ว่างเปล่าติดต่อกันกี่ปี? (มาตรา 43: รกร้างติดต่อกัน 3 ปีขึ้นไป อัตราภาษีจะเพิ่มขึ้น 0.3% ทุก 3 ปี)
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <input
+                      type="number"
+                      min="0"
+                      max="30"
+                      value={formData.vacantConsecutiveYears ?? 0}
+                      onChange={(e) => setFormData({ ...formData, vacantConsecutiveYears: Math.max(0, parseInt(e.target.value) || 0) })}
+                      className="w-16 px-2 py-1 bg-slate-800 border border-slate-700 rounded text-center text-slate-100 font-mono text-xs"
+                    />
+                    <span className="text-slate-400 text-xs">ปี</span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Live Calculation Output Card */}
+            <div className="p-3.5 rounded-xl bg-gradient-to-r from-slate-900 via-rose-950/20 to-slate-900 border border-rose-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-rose-300 font-semibold flex items-center gap-1.5">
+                    <Receipt className="w-3.5 h-3.5 text-rose-400" />
+                    ภาษีที่ดินและสิ่งปลูกสร้างประมาณการต่อปี (Annual Land Tax):
+                  </span>
+                  {liveTaxResult.exemptionAmount > 0 && (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-semibold border border-emerald-500/30">
+                      ยกเว้น {formatCurrency(liveTaxResult.exemptionAmount)}
+                    </span>
+                  )}
+                </div>
+                <div className="text-xl sm:text-2xl font-bold font-mono text-white flex items-baseline gap-2">
+                  {liveTaxResult.annualTax === 0 ? (
+                    <span className="text-emerald-400">0 ฿ / ปี</span>
+                  ) : (
+                    <span className="text-rose-300">{formatCurrency(liveTaxResult.annualTax)} / ปี</span>
+                  )}
+                  <span className="text-xs font-normal text-slate-400">
+                    (เฉลี่ย {formatCurrency(liveTaxResult.monthlyTax)} / เดือน)
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  {liveTaxResult.lawNote} • ฐานภาษี: {formatCurrency(liveTaxResult.taxableBase)} • อัตราภาษีแท้จริง: {liveTaxResult.effectiveRatePercent.toFixed(3)}%
+                </p>
+              </div>
+
+              <div className="text-right shrink-0">
+                <div className="text-[10px] text-slate-400">ประเภทตามแบบ ภ.ด.ส.</div>
+                <div className="text-xs font-semibold text-slate-200 mt-0.5">
+                  {TAX_USAGE_CONFIGS[liveTaxResult.usageType].shortLabel}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Section 5: Sales, Target Selling Price (KPI) & Status */}
           <div className="space-y-4 pt-4 border-t border-slate-800">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-emerald-400 flex items-center gap-2">
-              <Calculator className="w-4 h-4" /> 4. ประมาณการราคาขาย (KPI) และข้อมูลการขายจริง
+              <Calculator className="w-4 h-4" /> 5. ประมาณการราคาขาย (KPI) และข้อมูลการขายจริง
             </h3>
 
             <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
@@ -816,6 +1054,15 @@ export const LandFormModal: React.FC<LandFormModalProps> = ({
             </div>
 
             <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="hidden sm:inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs sm:text-sm font-medium transition-colors cursor-pointer"
+                title="พิมพ์ใบสรุปข้อมูลแปลงที่ดินนี้ (A4)"
+              >
+                <Printer className="w-4 h-4 text-emerald-400" />
+                <span>พิมพ์ใบสรุป</span>
+              </button>
               <button
                 type="button"
                 onClick={onClose}

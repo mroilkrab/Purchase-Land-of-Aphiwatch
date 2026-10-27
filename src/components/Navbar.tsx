@@ -16,7 +16,9 @@ import {
   BarChart3,
   Type,
   ChevronDown,
-  Check
+  Check,
+  Sun,
+  Moon
 } from 'lucide-react';
 import { PortfolioSettings, AppFontSize } from '../types/land';
 
@@ -30,6 +32,8 @@ interface NavbarProps {
   settings: PortfolioSettings;
   fontSize: AppFontSize;
   onFontSizeChange: (size: AppFontSize) => void;
+  theme: 'dark' | 'light';
+  onToggleTheme: () => void;
   isSyncing?: boolean;
 }
 
@@ -50,6 +54,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   settings,
   fontSize,
   onFontSizeChange,
+  theme,
+  onToggleTheme,
   isSyncing,
 }) => {
   const [showFontMenu, setShowFontMenu] = useState(false);
@@ -86,7 +92,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* Brand Logo & Name */}
           <div 
             className="flex items-center gap-2.5 sm:gap-3 cursor-pointer min-w-0" 
-            onClick={() => setActiveTab('dashboard')}
+            onClick={() => setActiveTab('table')}
           >
             <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-400 flex items-center justify-center shadow-lg shadow-emerald-500/20 text-white font-bold shrink-0">
               <Building2 className="w-5 h-5" />
@@ -189,6 +195,31 @@ export const Navbar: React.FC<NavbarProps> = ({
               )}
             </div>
 
+            {/* Quick Theme Switcher Button (โหมดสว่าง / โหมดมืด) */}
+            <button
+              type="button"
+              onClick={onToggleTheme}
+              className={`p-2 rounded-lg border transition-all cursor-pointer flex items-center gap-1.5 text-xs font-medium shadow-sm ${
+                theme === 'light'
+                  ? 'bg-amber-500/15 text-amber-600 border-amber-400/40 hover:bg-amber-500/25'
+                  : 'bg-slate-800/90 text-amber-300 border-slate-700/80 hover:bg-slate-700/80'
+              }`}
+              title={theme === 'light' ? 'เปลี่ยนเป็นโหมดมืด (Dark Mode)' : 'เปลี่ยนเป็นโหมดสว่าง (Light Mode)'}
+              aria-label="Toggle Light and Dark Theme"
+            >
+              {theme === 'light' ? (
+                <>
+                  <Sun className="w-4 h-4 text-amber-500 shrink-0 animate-spin-slow" />
+                  <span className="hidden xl:inline text-[11px] font-semibold">โหมดสว่าง</span>
+                </>
+              ) : (
+                <>
+                  <Moon className="w-4 h-4 text-amber-300 shrink-0" />
+                  <span className="hidden xl:inline text-[11px] font-semibold">โหมดมืด</span>
+                </>
+              )}
+            </button>
+
             {/* Add Plot Button */}
             <button
               onClick={onAddNewPlot}
@@ -243,18 +274,6 @@ export const Navbar: React.FC<NavbarProps> = ({
         {/* Tab Navigation with clean horizontal scrolling and no page blowout */}
         <nav className="flex space-x-1 sm:space-x-1.5 border-t border-slate-800/60 overflow-x-auto py-1.5 scrollbar-none max-w-full">
           <button
-            onClick={() => setActiveTab('dashboard')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all whitespace-nowrap shrink-0 cursor-pointer ${
-              activeTab === 'dashboard'
-                ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-semibold'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-            }`}
-          >
-            <LayoutDashboard className="w-3.5 h-3.5" />
-            แดชบอร์ด & KPI
-          </button>
-
-          <button
             onClick={() => setActiveTab('table')}
             className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all whitespace-nowrap shrink-0 cursor-pointer ${
               activeTab === 'table'
@@ -264,6 +283,18 @@ export const Navbar: React.FC<NavbarProps> = ({
           >
             <Table className="w-3.5 h-3.5" />
             ตารางข้อมูล & บัญชีซื้อขาย
+          </button>
+
+          <button
+            onClick={() => setActiveTab('dashboard')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all whitespace-nowrap shrink-0 cursor-pointer ${
+              activeTab === 'dashboard'
+                ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-semibold'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+            }`}
+          >
+            <LayoutDashboard className="w-3.5 h-3.5" />
+            แดชบอร์ด & KPI
           </button>
 
           <button

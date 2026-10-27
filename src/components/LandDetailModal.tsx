@@ -817,6 +817,17 @@ export const LandDetailModal: React.FC<LandDetailModalProps> = ({
 
           <div className="flex items-center gap-2">
             <button
+              onClick={() => {
+                onEdit(plot);
+              }}
+              className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center gap-1.5 shadow-md shadow-blue-600/30 transition-all cursor-pointer"
+              title="เปิดหน้าต่างแก้ไขข้อมูลแปลงนี้"
+            >
+              <Edit3 className="w-3.5 h-3.5" />
+              <span>แก้ไขข้อมูล</span>
+            </button>
+
+            <button
               onClick={() => handleDownloadPlotSummaryPdf('open')}
               disabled={isExportingPdf}
               className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-1.5 shadow-md shadow-emerald-600/30 transition-all cursor-pointer"
@@ -1123,6 +1134,24 @@ export const LandDetailModal: React.FC<LandDetailModalProps> = ({
                     รวมทั้งหมด <span className="text-amber-400 font-bold font-mono">{plot.totalSqWah?.toLocaleString('th-TH')} ตารางวา</span>
                     {plot.totalRai > 0 && <span className="text-slate-500 ml-1">({plot.totalRai} ไร่)</span>}
                   </div>
+                  {plot.partiallySoldTotalSqWah && plot.partiallySoldTotalSqWah > 0 ? (
+                    <div className="pt-2 border-t border-slate-800 text-xs space-y-1">
+                      <div className="text-amber-300 flex items-center justify-between">
+                        <span>ขายไปบางส่วน:</span>
+                        <span className="font-mono font-bold">
+                          {formatThaiArea(plot.partiallySoldRai || 0, plot.partiallySoldNgan || 0, plot.partiallySoldSqWah || 0)} ({plot.partiallySoldTotalSqWah.toLocaleString('th-TH')} ตร.ว.)
+                        </span>
+                      </div>
+                      {plot.remainingSqWah !== undefined && (
+                        <div className="text-emerald-300 flex items-center justify-between font-semibold">
+                          <span>คงเหลือปัจจุบัน:</span>
+                          <span className="font-mono font-bold">
+                            {formatThaiArea(Math.floor(plot.remainingSqWah / 400), Math.floor((plot.remainingSqWah % 400) / 100), (plot.remainingSqWah % 400) % 100)} ({plot.remainingSqWah.toLocaleString('th-TH')} ตร.ว.)
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 space-y-2">
@@ -2379,10 +2408,9 @@ export const LandDetailModal: React.FC<LandDetailModalProps> = ({
           <div className="flex items-center gap-2">
             <button
               onClick={() => {
-                onClose();
                 onEdit(plot);
               }}
-              className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 flex items-center gap-1.5 cursor-pointer"
+              className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-md shadow-blue-600/30 transition-all"
             >
               <Edit3 className="w-4 h-4" />
               แก้ไขข้อมูล

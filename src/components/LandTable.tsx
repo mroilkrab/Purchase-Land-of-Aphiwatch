@@ -993,12 +993,22 @@ export const LandTable: React.FC<LandTableProps> = ({
                         <span className="font-semibold text-slate-200 font-mono">
                           {formatThaiArea(plot.rai, plot.ngan, plot.sqWah)}
                         </span>
+                        {plot.partiallySoldTotalSqWah && plot.partiallySoldTotalSqWah > 0 ? (
+                          <span className="text-[10px] text-amber-400 block mt-0.5">
+                            ขายไป: {formatThaiArea(plot.partiallySoldRai || 0, plot.partiallySoldNgan || 0, plot.partiallySoldSqWah || 0)}
+                          </span>
+                        ) : null}
                       </div>
                       <div className="p-2.5 rounded-xl bg-slate-800/50 border border-slate-800">
                         <span className="text-slate-400 block text-[11px]">รวมตารางวา</span>
                         <span className="font-semibold text-amber-400 font-mono">
                           {plot.totalSqWah.toLocaleString('th-TH')} ตร.ว.
                         </span>
+                        {plot.remainingSqWah !== undefined && plot.partiallySoldTotalSqWah && plot.partiallySoldTotalSqWah > 0 ? (
+                          <span className="text-[10px] text-emerald-400 font-semibold block mt-0.5">
+                            คงเหลือ {plot.remainingSqWah.toLocaleString('th-TH')} ตร.ว.
+                          </span>
+                        ) : null}
                       </div>
                     </div>
 
@@ -1094,11 +1104,15 @@ export const LandTable: React.FC<LandTableProps> = ({
                       </button>
 
                       <button
-                        onClick={() => onEditPlot(plot)}
-                        className="py-1.5 px-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-blue-400 hover:text-blue-300 transition-colors cursor-pointer"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onEditPlot(plot);
+                        }}
+                        className="py-1.5 px-3 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 hover:text-white border border-blue-500/30 font-medium flex items-center justify-center gap-1 transition-colors cursor-pointer text-[11px]"
                         title="แก้ไขข้อมูลแปลงนี้"
                       >
                         <Edit3 className="w-3.5 h-3.5" />
+                        <span>แก้ไข</span>
                       </button>
 
                       <button
@@ -1145,10 +1159,10 @@ export const LandTable: React.FC<LandTableProps> = ({
 
           {/* Main Table Container */}
           <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/80 shadow-lg relative max-w-full">
-            <table className="w-full text-left text-xs border-collapse min-w-[1300px]">
+            <table className="w-full text-left text-xs border-separate border-spacing-0 min-w-[1360px]">
               <thead>
                 <tr className="bg-slate-800/90 border-b border-slate-700 text-slate-300 font-semibold sticky top-0 z-20">
-                  <th className="py-3 px-2 w-8 text-center">
+                  <th className="py-3 px-2 w-8 text-center border-b border-slate-700">
                     <input
                       type="checkbox"
                       checked={filteredPlots.length > 0 && selectedPlotIds.length === filteredPlots.length}
@@ -1157,23 +1171,23 @@ export const LandTable: React.FC<LandTableProps> = ({
                       title="เลือกทั้งหมด"
                     />
                   </th>
-                  <th className="py-3 px-3 w-12 text-center">ลำดับ</th>
-                  <th className="py-3 px-3 w-24">วันที่ซื้อ</th>
-                  <th className="py-3 px-3 w-24">วันที่ขาย</th>
-                  <th className="py-3 px-4 min-w-[200px]">รายละเอียดที่ดิน / ประเภท</th>
-                  <th className="py-3 px-3">ตำบล/อำเภอ/จังหวัด</th>
-                  <th className="py-3 px-3">เลขที่ดิน</th>
-                  <th className="py-3 px-3 text-center">พิกัด Maps</th>
-                  <th className="py-3 px-3 text-right">เนื้อที่ (ไร่-งาน-วา)</th>
-                  <th className="py-3 px-3 text-right">รวม ตร.ว.</th>
-                  <th className="py-3 px-3 text-right">ราคาซื้อ</th>
-                  <th className="py-3 px-3 text-right">ภาษี/รังวัด/อื่นๆ</th>
-                  <th className="py-3 px-3 text-right font-bold text-white bg-slate-800">ต้นทุนรวมทั้งสิ้น</th>
-                  <th className="py-3 px-3 text-right text-rose-300">ภาษีที่ดิน/ปี</th>
-                  <th className="py-3 px-3 text-right text-emerald-400">ราคาตั้งใจขาย (KPI)</th>
-                  <th className="py-3 px-3 text-center">สถานะ</th>
+                  <th className="py-3 px-3 w-12 text-center border-b border-slate-700">ลำดับ</th>
+                  <th className="py-3 px-3 w-24 border-b border-slate-700">วันที่ซื้อ</th>
+                  <th className="py-3 px-3 w-24 border-b border-slate-700">วันที่ขาย</th>
+                  <th className="py-3 px-4 min-w-[220px] border-b border-slate-700">รายละเอียดที่ดิน / ประเภท</th>
+                  <th className="py-3 px-3 border-b border-slate-700">ตำบล/อำเภอ/จังหวัด</th>
+                  <th className="py-3 px-3 border-b border-slate-700">เลขที่ดิน</th>
+                  <th className="py-3 px-3 text-center border-b border-slate-700">พิกัด Maps</th>
+                  <th className="py-3 px-3 text-right border-b border-slate-700">เนื้อที่ (ไร่-งาน-วา)</th>
+                  <th className="py-3 px-3 text-right border-b border-slate-700">รวม ตร.ว.</th>
+                  <th className="py-3 px-3 text-right border-b border-slate-700">ราคาซื้อ</th>
+                  <th className="py-3 px-3 text-right border-b border-slate-700">ภาษี/รังวัด/อื่นๆ</th>
+                  <th className="py-3 px-3 text-right font-bold text-white bg-slate-800 border-b border-slate-700">ต้นทุนรวมทั้งสิ้น</th>
+                  <th className="py-3 px-3 text-right text-rose-300 border-b border-slate-700">ภาษีที่ดิน/ปี</th>
+                  <th className="py-3 px-3 text-right text-emerald-400 border-b border-slate-700">ราคาตั้งใจขาย (KPI)</th>
+                  <th className="py-3 px-3 text-center border-b border-slate-700">สถานะ</th>
                   {/* Sticky Action Column so actions are always reachable */}
-                  <th className="py-3 px-3 text-center w-28 sticky right-0 bg-slate-800 border-l border-slate-700 shadow-[-4px_0_8px_rgba(0,0,0,0.3)] z-30">
+                  <th className="py-3 px-3 text-center w-36 min-w-[145px] sticky right-0 bg-slate-800 border-b border-l border-slate-700 shadow-[-4px_0_10px_rgba(0,0,0,0.4)] z-30">
                     จัดการ
                   </th>
                 </tr>
@@ -1245,15 +1259,28 @@ export const LandTable: React.FC<LandTableProps> = ({
                             )}
                           </td>
                           <td className="py-3 px-4">
-                            <div className="font-semibold text-slate-100 flex items-center gap-1.5">
-                              {plot.title}
-                              {plot.images && plot.images.length > 0 && (
-                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[10px] bg-slate-800 text-teal-400 border border-teal-500/30">
-                                  <ImageIcon className="w-2.5 h-2.5" /> {plot.images.length}
-                                </span>
-                              )}
+                            <div className="flex items-center justify-between gap-1.5">
+                              <div className="font-semibold text-slate-100 flex items-center gap-1.5 min-w-0">
+                                <span className="truncate">{plot.title}</span>
+                                {plot.images && plot.images.length > 0 && (
+                                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[10px] bg-slate-800 text-teal-400 border border-teal-500/30 shrink-0">
+                                    <ImageIcon className="w-2.5 h-2.5" /> {plot.images.length}
+                                  </span>
+                                )}
+                              </div>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onEditPlot(plot);
+                                }}
+                                className="px-1.5 py-0.5 rounded bg-blue-500/15 hover:bg-blue-600 text-blue-300 hover:text-white border border-blue-500/30 text-[10px] font-semibold flex items-center gap-1 transition-all cursor-pointer shrink-0 shadow-xs"
+                                title={`คลิกเพื่อแก้ไขข้อมูลแปลง #${plot.orderNumber}: ${plot.title}`}
+                              >
+                                <Edit3 className="w-2.5 h-2.5" />
+                                <span>แก้ไข</span>
+                              </button>
                             </div>
-                            <div className="text-[11px] text-slate-400">
+                            <div className="text-[11px] text-slate-400 mt-0.5">
                               ประเภท: <span className="text-slate-300">{plot.landType}</span>
                               {plot.notes && (
                                 <span className="text-slate-500 ml-1 truncate max-w-[200px] inline-block align-bottom">
@@ -1291,10 +1318,20 @@ export const LandTable: React.FC<LandTableProps> = ({
                             )}
                           </td>
                           <td className="py-3 px-3 text-right font-mono text-slate-200">
-                            {formatThaiArea(plot.rai, plot.ngan, plot.sqWah)}
+                            <div>{formatThaiArea(plot.rai, plot.ngan, plot.sqWah)}</div>
+                            {plot.partiallySoldTotalSqWah && plot.partiallySoldTotalSqWah > 0 ? (
+                              <div className="text-[10px] text-amber-400 font-sans">
+                                ขาย: {formatThaiArea(plot.partiallySoldRai || 0, plot.partiallySoldNgan || 0, plot.partiallySoldSqWah || 0)}
+                              </div>
+                            ) : null}
                           </td>
                           <td className="py-3 px-3 text-right font-mono text-slate-300">
-                            {plot.totalSqWah.toLocaleString('th-TH')}
+                            <div>{plot.totalSqWah.toLocaleString('th-TH')}</div>
+                            {plot.remainingSqWah !== undefined && plot.partiallySoldTotalSqWah && plot.partiallySoldTotalSqWah > 0 && (
+                              <div className="text-[10px] text-emerald-400 font-sans font-semibold">
+                                เหลือ {plot.remainingSqWah.toLocaleString('th-TH')} ตร.ว.
+                              </div>
+                            )}
                           </td>
                           <td className="py-3 px-3 text-right font-mono text-slate-200">
                             {formatCurrency(plot.purchasePrice)}
@@ -1348,31 +1385,44 @@ export const LandTable: React.FC<LandTableProps> = ({
                             </span>
                           </td>
                           {/* Sticky Action TD so user always has access to Edit / Delete / View */}
-                          <td className="py-3 px-3 text-center sticky right-0 bg-slate-900/95 backdrop-blur-sm border-l border-slate-800 shadow-[-4px_0_8px_rgba(0,0,0,0.3)] z-10" onClick={(e) => e.stopPropagation()}>
-                            <div className="flex items-center justify-center gap-1">
+                          <td className="py-2.5 px-3 text-center sticky right-0 bg-slate-900/98 backdrop-blur-md border-b border-l border-slate-700/80 shadow-[-4px_0_12px_rgba(0,0,0,0.5)] z-20" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex items-center justify-center gap-1.5">
                               <button
-                                onClick={() => onSelectPlot(plot)}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onSelectPlot(plot);
+                                }}
                                 title="ดูรายละเอียดแปลงนี้"
                                 className="p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-colors cursor-pointer"
                               >
                                 <Eye className="w-4 h-4" />
                               </button>
                               <button
-                                onClick={() => onEditPlot(plot)}
-                                title="แก้ไขข้อมูลแปลงนี้"
-                                className="p-1.5 text-slate-400 hover:text-blue-400 hover:bg-blue-500/10 rounded-lg transition-colors cursor-pointer"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onEditPlot(plot);
+                                }}
+                                title="แก้ไขข้อมูลแปลงนี้ (เปิดฟอร์มแก้ไข)"
+                                className="px-2 py-1 bg-blue-600/25 hover:bg-blue-600 text-blue-200 hover:text-white border border-blue-500/40 rounded-lg transition-all font-semibold text-xs flex items-center gap-1 cursor-pointer shadow-sm"
                               >
-                                <Edit3 className="w-4 h-4" />
+                                <Edit3 className="w-3.5 h-3.5" />
+                                <span>แก้ไข</span>
                               </button>
                               <button
-                                onClick={() => onDuplicatePlot(plot)}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onDuplicatePlot(plot);
+                                }}
                                 title="ทำซ้ำแปลงนี้"
                                 className="p-1.5 text-slate-400 hover:text-purple-400 hover:bg-purple-500/10 rounded-lg transition-colors cursor-pointer"
                               >
                                 <Copy className="w-4 h-4" />
                               </button>
                               <button
-                                onClick={() => setPlotToDelete(plot)}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setPlotToDelete(plot);
+                                }}
                                 title="ลบแปลงที่ดินนี้ (และอัปเดต Google Sheet)"
                                 className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer"
                               >
@@ -1427,8 +1477,18 @@ export const LandTable: React.FC<LandTableProps> = ({
                               <td colSpan={6} className="py-2 px-3 text-slate-600 text-[10px] italic">
                                 (นับรวมในแปลงแม่ #{plot.orderNumber})
                               </td>
-                              <td className="py-2 px-3 text-center sticky right-0 bg-slate-950/95 backdrop-blur-sm border-l border-slate-800/80 shadow-[-4px_0_8px_rgba(0,0,0,0.3)] z-10">
-                                <span className="text-[10px] text-slate-600">-</span>
+                              <td className="py-2 px-3 text-center sticky right-0 bg-slate-950/95 backdrop-blur-sm border-l border-slate-800/80 shadow-[-4px_0_8px_rgba(0,0,0,0.3)] z-10" onClick={(e) => e.stopPropagation()}>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onEditPlot(plot);
+                                  }}
+                                  className="px-2 py-0.5 rounded bg-blue-500/15 hover:bg-blue-600 text-blue-300 hover:text-white text-[10px] font-medium border border-blue-500/30 inline-flex items-center gap-1 cursor-pointer transition-colors"
+                                  title={`แก้ไขข้อมูลแปลงแม่ #${plot.orderNumber} (รวมโฉนดย่อย)`}
+                                >
+                                  <Edit3 className="w-2.5 h-2.5" />
+                                  <span>แก้ไข</span>
+                                </button>
                               </td>
                             </tr>
                           ))

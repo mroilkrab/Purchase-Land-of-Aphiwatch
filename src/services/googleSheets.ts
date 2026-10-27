@@ -15,16 +15,25 @@ export const formatLandPlotsForSheet = (
 ): (string | number)[][] => {
   const rows: (string | number)[][] = [];
 
-  // Title header row
+  // Row 1: Title header
   rows.push([settings.portfolioTitle || `รายละเอียดการซื้อที่ดิน - ${settings.ownerName || 'อภิวัชร์'}`]);
 
-  // Grand total summary row
+  // Row 2: Grand total summary row matching user Google Sheet
+  const purchaseSum = plots.reduce((acc, p) => acc + (p.purchasePrice || 0), 0);
+  const taxSum = plots.reduce((acc, p) => acc + (p.taxAndFees || 0), 0);
+  const surveySum = plots.reduce((acc, p) => acc + (p.surveyCost || 0), 0);
+  const otherSum = plots.reduce((acc, p) => acc + (p.otherExpenses || 0), 0);
   const totalCostSum = plots.reduce((acc, p) => acc + (p.totalCost || 0), 0);
-  const row2: (string | number)[] = Array(17).fill('');
-  row2[17] = totalCostSum.toLocaleString('th-TH');
+
+  const row2: (string | number)[] = Array(32).fill('');
+  row2[22] = purchaseSum.toLocaleString('th-TH');
+  row2[23] = taxSum.toLocaleString('th-TH');
+  row2[24] = surveySum.toLocaleString('th-TH');
+  row2[25] = otherSum.toLocaleString('th-TH');
+  row2[26] = totalCostSum.toLocaleString('th-TH');
   rows.push(row2);
 
-  // Column header row 1
+  // Row 3: Column header row 1
   rows.push([
     'ลำดับ',
     'วันที่ซื้อ',
@@ -35,32 +44,34 @@ export const formatLandPlotsForSheet = (
     'อำเภอ/เขต',
     'จังหวัด',
     'เลขที่ดิน',
-    'ตำแหน่งที่ดิน (Maps)',
-    'ไร่',
-    'งาน',
-    'ตารางวา',
-    'รวมจำนวนที่ดิน(ไร่)',
-    'รวมจำนวนที่ดิน(ตร.ว.)',
-    'ไร่ละ',
+    'ตำแหน่งที่ดิน',
+    'ขนาดที่ดิน (ไร่)',
+    'ขนาดที่ดิน (งาน)',
+    'ขนาดที่ดิน (ตารางวา)',
+    'รวมจำนวนที่ดิน (ไร่)',
+    'รวมจำนวนที่ดิน (ตร.ว.)',
+    'ขายไปบางส่วน (ไร่)',
+    'ขายไปบางส่วน (งาน)',
+    'ขายไปบางส่วน (ตารางวา)',
+    'ขายไปบางส่วน รวม (ตร.ว.)',
+    'คงเหลือ (ตร.ว.)',
+    'ราคา (ไร่ละ)',
     'ตารางวาละ',
     'ราคารวม/ราคาซื้อ',
     'จ่ายค่าธรรมเนียม/ค่าอากร/ภาษี',
     'จ่ายค่ารังวัด',
     'จ่ายค่าใช้จ่ายอื่นๆ',
     'รวมทั้งสิ้น/ทั้งหมด',
-    'ราคาที่ตั้งใจจะขาย (KPI)',
+    'ราคาที่ตั้งใจจะขาย',
     'ราคาที่ขายได้',
     'ค่าคอมมิชชั่น',
     'สุทธิที่ได้รับ',
-    'สถานะ',
     'หมายเหตุเพิ่มเติม',
   ]);
 
   // Data rows
   plots.forEach((plot) => {
-    // If the plot has multiple sub-parcels, we output the parent plot row and sub rows
     if (plot.subParcels && plot.subParcels.length > 1) {
-      // First parcel row
       const firstSp = plot.subParcels[0];
       rows.push([
         plot.orderNumber,
@@ -78,6 +89,11 @@ export const formatLandPlotsForSheet = (
         firstSp.sqWah,
         plot.totalRai,
         plot.totalSqWah,
+        plot.partiallySoldRai ?? 0,
+        plot.partiallySoldNgan ?? 0,
+        plot.partiallySoldSqWah ?? 0,
+        plot.partiallySoldTotalSqWah ?? 0,
+        plot.remainingSqWah ?? plot.totalSqWah,
         plot.pricePerRai ? plot.pricePerRai.toLocaleString('th-TH') : '-',
         plot.pricePerSqWah ? plot.pricePerSqWah.toLocaleString('th-TH') : '-',
         plot.purchasePrice ? plot.purchasePrice.toLocaleString('th-TH') : '-',
@@ -89,7 +105,6 @@ export const formatLandPlotsForSheet = (
         plot.soldPrice ? plot.soldPrice.toLocaleString('th-TH') : '-',
         plot.commissionFee ? plot.commissionFee.toLocaleString('th-TH') : '-',
         plot.netReceived ? plot.netReceived.toLocaleString('th-TH') : '-',
-        getStatusLabel(plot.status),
         plot.notes || '',
       ]);
 
@@ -97,11 +112,11 @@ export const formatLandPlotsForSheet = (
       for (let i = 1; i < plot.subParcels.length; i++) {
         const sp = plot.subParcels[i];
         rows.push([
-          '', // ลำดับ
-          '', // วันที่ซื้อ
-          '', // วันที่ขาย
-          '', // รายละเอียด
-          '', // ประเภท
+          '',
+          '',
+          '',
+          '',
+          '',
           plot.subdistrict,
           plot.district,
           plot.province,
@@ -112,6 +127,10 @@ export const formatLandPlotsForSheet = (
           sp.sqWah,
           '',
           sp.totalSqWah,
+          '',
+          '',
+          '',
+          '',
           '',
           '',
           '',
@@ -145,6 +164,11 @@ export const formatLandPlotsForSheet = (
         plot.sqWah,
         plot.totalRai,
         plot.totalSqWah,
+        plot.partiallySoldRai ?? 0,
+        plot.partiallySoldNgan ?? 0,
+        plot.partiallySoldSqWah ?? 0,
+        plot.partiallySoldTotalSqWah ?? 0,
+        plot.remainingSqWah ?? plot.totalSqWah,
         plot.pricePerRai ? plot.pricePerRai.toLocaleString('th-TH') : '-',
         plot.pricePerSqWah ? plot.pricePerSqWah.toLocaleString('th-TH') : '-',
         plot.purchasePrice ? plot.purchasePrice.toLocaleString('th-TH') : '-',
@@ -156,7 +180,6 @@ export const formatLandPlotsForSheet = (
         plot.soldPrice ? plot.soldPrice.toLocaleString('th-TH') : '-',
         plot.commissionFee ? plot.commissionFee.toLocaleString('th-TH') : '-',
         plot.netReceived ? plot.netReceived.toLocaleString('th-TH') : '-',
-        getStatusLabel(plot.status),
         plot.notes || '',
       ]);
     }

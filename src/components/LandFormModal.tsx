@@ -98,7 +98,46 @@ export const LandFormModal: React.FC<LandFormModalProps> = ({
 
   useEffect(() => {
     if (initialData) {
-      setFormData(initialData);
+      setFormData({
+        ...initialData,
+        orderNumber: Number(initialData.orderNumber) || nextOrderNumber,
+        purchaseDate: initialData.purchaseDate || '',
+        saleDate: initialData.saleDate || '',
+        title: initialData.title || '',
+        landType: initialData.landType || 'ที่ดินเปล่า',
+        subdistrict: initialData.subdistrict || '',
+        district: initialData.district || '',
+        province: initialData.province || 'นครสวรรค์',
+        primaryDeedNumber: initialData.primaryDeedNumber || '',
+        mapsUrl: initialData.mapsUrl || '',
+        latitude: initialData.latitude,
+        longitude: initialData.longitude,
+        rai: Number(initialData.rai) || 0,
+        ngan: Number(initialData.ngan) || 0,
+        sqWah: Number(initialData.sqWah) || 0,
+        totalRai: Number(initialData.totalRai) || 0,
+        totalSqWah: Number(initialData.totalSqWah) || 0,
+        pricePerRai: Number(initialData.pricePerRai) || 0,
+        pricePerSqWah: Number(initialData.pricePerSqWah) || 0,
+        purchasePrice: Number(initialData.purchasePrice) || 0,
+        taxAndFees: Number(initialData.taxAndFees) || 0,
+        surveyCost: Number(initialData.surveyCost) || 0,
+        otherExpenses: Number(initialData.otherExpenses) || 0,
+        totalCost: Number(initialData.totalCost) || 0,
+        targetSalePrice: Number(initialData.targetSalePrice) || 0,
+        soldPrice: Number(initialData.soldPrice) || 0,
+        commissionFee: Number(initialData.commissionFee) || 0,
+        netReceived: Number(initialData.netReceived) || 0,
+        partiallySoldRai: Number(initialData.partiallySoldRai) || 0,
+        partiallySoldNgan: Number(initialData.partiallySoldNgan) || 0,
+        partiallySoldSqWah: Number(initialData.partiallySoldSqWah) || 0,
+        partiallySoldTotalSqWah: Number(initialData.partiallySoldTotalSqWah) || 0,
+        remainingSqWah: initialData.remainingSqWah !== undefined ? Number(initialData.remainingSqWah) : Number(initialData.totalSqWah) || 0,
+        status: initialData.status || 'holding',
+        notes: initialData.notes || '',
+        subParcels: initialData.subParcels ? [...initialData.subParcels] : [],
+        images: initialData.images ? [...initialData.images] : [],
+      });
     } else {
       setFormData({
         id: `plot-${Date.now()}`,
@@ -290,7 +329,7 @@ export const LandFormModal: React.FC<LandFormModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm overflow-y-auto">
+    <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm overflow-y-auto">
       <div className="relative w-full max-w-4xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden my-8 max-h-[90vh] flex flex-col">
         {/* Modal Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-800/60 sticky top-0 z-20">
@@ -575,6 +614,95 @@ export const LandFormModal: React.FC<LandFormModalProps> = ({
               </div>
             </div>
 
+            {/* Partial sales and remaining area inputs */}
+            <div className="p-3.5 bg-slate-950/60 rounded-xl border border-slate-800/80 space-y-3">
+              <div>
+                <span className="text-xs font-semibold text-slate-200">ขายไปบางส่วน (ถ้ามี) & เนื้อที่คงเหลือ</span>
+                <p className="text-[11px] text-slate-400">กรณีตัดแบ่งขายบางส่วน เช่น แปลงเดิม 5-0-54 ไร่ ขายไป 3-0-54 ไร่ คงเหลือ 800 ตร.ว.</p>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                <div>
+                  <label className="block text-[11px] text-slate-400 mb-1">ขายไป (ไร่)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={formData.partiallySoldRai ?? 0}
+                    onChange={(e) => {
+                      const r = Number(e.target.value);
+                      const n = formData.partiallySoldNgan || 0;
+                      const w = formData.partiallySoldSqWah || 0;
+                      const soldTotal = r * 400 + n * 100 + w;
+                      const totalSqW = formData.totalSqWah || 0;
+                      setFormData({
+                        ...formData,
+                        partiallySoldRai: r,
+                        partiallySoldTotalSqWah: soldTotal,
+                        remainingSqWah: Math.max(0, totalSqW - soldTotal),
+                      });
+                    }}
+                    className="w-full px-2.5 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-slate-200 font-mono text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-slate-400 mb-1">ขายไป (งาน)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="3"
+                    value={formData.partiallySoldNgan ?? 0}
+                    onChange={(e) => {
+                      const n = Number(e.target.value);
+                      const r = formData.partiallySoldRai || 0;
+                      const w = formData.partiallySoldSqWah || 0;
+                      const soldTotal = r * 400 + n * 100 + w;
+                      const totalSqW = formData.totalSqWah || 0;
+                      setFormData({
+                        ...formData,
+                        partiallySoldNgan: n,
+                        partiallySoldTotalSqWah: soldTotal,
+                        remainingSqWah: Math.max(0, totalSqW - soldTotal),
+                      });
+                    }}
+                    className="w-full px-2.5 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-slate-200 font-mono text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-slate-400 mb-1">ขายไป (ตร.ว.)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={formData.partiallySoldSqWah ?? 0}
+                    onChange={(e) => {
+                      const w = Number(e.target.value);
+                      const r = formData.partiallySoldRai || 0;
+                      const n = formData.partiallySoldNgan || 0;
+                      const soldTotal = r * 400 + n * 100 + w;
+                      const totalSqW = formData.totalSqWah || 0;
+                      setFormData({
+                        ...formData,
+                        partiallySoldSqWah: w,
+                        partiallySoldTotalSqWah: soldTotal,
+                        remainingSqWah: Math.max(0, totalSqW - soldTotal),
+                      });
+                    }}
+                    className="w-full px-2.5 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-slate-200 font-mono text-xs"
+                  />
+                </div>
+                <div className="bg-slate-800/80 p-2 rounded-lg border border-slate-700/80">
+                  <span className="text-[10px] text-slate-400 block">ขายไปรวม (ตร.ว.):</span>
+                  <span className="text-xs font-bold text-amber-400 font-mono">
+                    {(formData.partiallySoldTotalSqWah || 0).toLocaleString('th-TH')} ตร.ว.
+                  </span>
+                </div>
+                <div className="bg-slate-800/80 p-2 rounded-lg border border-slate-700/80">
+                  <span className="text-[10px] text-slate-400 block">เนื้อที่คงเหลือ:</span>
+                  <span className="text-xs font-bold text-emerald-400 font-mono">
+                    {((formData.remainingSqWah !== undefined) ? formData.remainingSqWah : (formData.totalSqWah || 0)).toLocaleString('th-TH')} ตร.ว.
+                  </span>
+                </div>
+              </div>
+            </div>
+
             {/* Sub-parcels Section */}
             <div className="p-3.5 bg-slate-950/60 rounded-xl border border-slate-800/80 space-y-3">
               <div className="flex items-center justify-between">
@@ -852,7 +980,7 @@ export const LandFormModal: React.FC<LandFormModalProps> = ({
               <div className="text-right shrink-0">
                 <div className="text-[10px] text-slate-400">ประเภทตามแบบ ภ.ด.ส.</div>
                 <div className="text-xs font-semibold text-slate-200 mt-0.5">
-                  {TAX_USAGE_CONFIGS[liveTaxResult.usageType].shortLabel}
+                  {TAX_USAGE_CONFIGS[liveTaxResult.usageType]?.shortLabel || 'ทั่วไป/รกร้าง'}
                 </div>
               </div>
             </div>

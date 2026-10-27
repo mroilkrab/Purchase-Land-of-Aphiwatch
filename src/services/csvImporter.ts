@@ -128,53 +128,64 @@ export function parseCsvToPlots(csvText: string, startOrderNumber: number = 1): 
   }
 
   let lineIndex = 0;
-  let firstLineTokens = tokenizeCsvLine(rawLines[0], delimiter);
-
-  // If first line has only 1 column and looks like a title (e.g. "รายละเอียดการซื้อที่ดิน - อภิวัชร์"), skip it
-  if (firstLineTokens.length === 1 && rawLines.length > 1) {
-    lineIndex++;
-    firstLineTokens = tokenizeCsvLine(rawLines[lineIndex], delimiter);
-  }
-
-  // Detect header columns mapping
   const headerMap: { [key: string]: number } = {};
-  const isHeaderRow = firstLineTokens.some((tok) =>
-    /ลำดับ|order|วันที่|ซื้อ|รายละเอียด|ชื่อ|title|ประเภท|ตำบล|อำเภอ|จังหวัด|โฉนด|ไร่|งาน|วา|ราคา|cost|status|สถานะ/i.test(tok)
-  );
 
-  if (isHeaderRow) {
-    firstLineTokens.forEach((header, idx) => {
-      const h = header.toLowerCase().replace(/[\s/\\()_.-]/g, '');
-      if (/ลำดับ|order|no|id/.test(h)) headerMap['orderNumber'] = idx;
-      else if (/วันที่ซื้อ|purchasedate|buydate/.test(h)) headerMap['purchaseDate'] = idx;
-      else if (/วันที่ขาย|saledate/.test(h)) headerMap['saleDate'] = idx;
-      else if (/รายละเอียด|ชื่อแปลง|title|name|description/.test(h)) headerMap['title'] = idx;
-      else if (/ประเภท|landtype|type/.test(h)) headerMap['landType'] = idx;
-      else if (/ตำบล|แขวง|subdistrict/.test(h)) headerMap['subdistrict'] = idx;
-      else if (/อำเภอ|เขต|district/.test(h)) headerMap['district'] = idx;
-      else if (/จังหวัด|province/.test(h)) headerMap['province'] = idx;
-      else if (/เลขที่ดิน|เลขโฉนด|deed|โฉนด/.test(h)) headerMap['primaryDeedNumber'] = idx;
-      else if (/ตำแหน่ง|แผนที่|maps|url|พิกัด|location/.test(h)) headerMap['mapsUrl'] = idx;
-      else if (/รวมไร่|รวมจำนวนที่ดินไร่|totalrai/.test(h)) headerMap['totalRai'] = idx;
-      else if (/รวมตารางวา|รวมตรว|รวมจำนวนที่ดินตรว|totalsqwah/.test(h)) headerMap['totalSqWah'] = idx;
-      else if (/^ไร่$|rai/.test(h)) headerMap['rai'] = idx;
-      else if (/^งาน$|ngan/.test(h)) headerMap['ngan'] = idx;
-      else if (/^ตารางวา$|^วา$|sqwah/.test(h)) headerMap['sqWah'] = idx;
-      else if (/ไร่ละ|pricerai/.test(h)) headerMap['pricePerRai'] = idx;
-      else if (/ตารางวาละ|pricesqwah/.test(h)) headerMap['pricePerSqWah'] = idx;
-      else if (/ราคารวม|ราคาซื้อ|purchaseprice/.test(h)) headerMap['purchasePrice'] = idx;
-      else if (/ค่าธรรมเนียม|ค่าอากร|ภาษี|tax/.test(h)) headerMap['taxAndFees'] = idx;
-      else if (/ค่ารังวัด|survey/.test(h)) headerMap['surveyCost'] = idx;
-      else if (/ค่าใช้จ่ายอื่นๆ|otherexpenses/.test(h)) headerMap['otherExpenses'] = idx;
-      else if (/รวมทั้งสิ้น|รวมทั้งหมด|รวมต้นทุน|totalcost|cost/.test(h)) headerMap['totalCost'] = idx;
-      else if (/ราคาที่ตั้งใจจะขาย|ราคาขายเป้าหมาย|targetsale|target/.test(h)) headerMap['targetSalePrice'] = idx;
-      else if (/ราคาที่ขายได้|soldprice|sold/.test(h)) headerMap['soldPrice'] = idx;
-      else if (/คอมมิชชั่น|commission/.test(h)) headerMap['commissionFee'] = idx;
-      else if (/สุทธิ|netreceived|net/.test(h)) headerMap['netReceived'] = idx;
-      else if (/สถานะ|status/.test(h)) headerMap['status'] = idx;
-      else if (/หมายเหตุ|note|notes|remark/.test(h)) headerMap['notes'] = idx;
-    });
-    lineIndex++; // Move past header row
+  // Scan the first 5 lines to locate the main header row containing "ลำดับ" or "วันที่ซื้อ"
+  for (let scanIdx = 0; scanIdx < Math.min(rawLines.length, 6); scanIdx++) {
+    const tokens = tokenizeCsvLine(rawLines[scanIdx], delimiter);
+    const hasHeaderSignature = tokens.some((tok) =>
+      /ลำดับ|order|วันที่ซื้อ|purchasedate|รายละเอียดที่ดิน|เลขที่ดิน/i.test(tok)
+    );
+
+    if (hasHeaderSignature) {
+      tokens.forEach((header, idx) => {
+        const h = header.toLowerCase().replace(/[\s/\\()_.-]/g, '');
+        if (/ลำดับ|order|no|id/.test(h)) headerMap['orderNumber'] = idx;
+        else if (/วันที่ซื้อ|purchasedate|buydate/.test(h)) headerMap['purchaseDate'] = idx;
+        else if (/วันที่ขาย|saledate/.test(h)) headerMap['saleDate'] = idx;
+        else if (/รายละเอียด|ชื่อแปลง|title|name|description/.test(h)) headerMap['title'] = idx;
+        else if (/ประเภท|landtype|type/.test(h)) headerMap['landType'] = idx;
+        else if (/ตำบล|แขวง|subdistrict/.test(h)) headerMap['subdistrict'] = idx;
+        else if (/อำเภอ|เขต|district/.test(h)) headerMap['district'] = idx;
+        else if (/จังหวัด|province/.test(h)) headerMap['province'] = idx;
+        else if (/เลขที่ดิน|เลขโฉนด|deed|โฉนด/.test(h)) headerMap['primaryDeedNumber'] = idx;
+        else if (/ตำแหน่ง|แผนที่|maps|url|พิกัด|location/.test(h)) headerMap['mapsUrl'] = idx;
+        else if (/ขายไป.*ไร่|partiallysoldrai/.test(h)) headerMap['partiallySoldRai'] = idx;
+        else if (/ขายไป.*งาน|partiallysoldngan/.test(h)) headerMap['partiallySoldNgan'] = idx;
+        else if (/ขายไป.*วา|partiallysoldsqwah/.test(h)) headerMap['partiallySoldSqWah'] = idx;
+        else if (/ขายไป.*ตร|ขายไป.*รวม|partiallysoldtotal/.test(h)) headerMap['partiallySoldTotalSqWah'] = idx;
+        else if (/คงเหลือ|remainingsqwah|remain/.test(h)) headerMap['remainingSqWah'] = idx;
+        else if (/รวมไร่|รวมจำนวนที่ดินไร่|totalrai/.test(h)) headerMap['totalRai'] = idx;
+        else if (/รวมตารางวา|รวมตรว|รวมจำนวนที่ดินตรว|totalsqwah/.test(h)) headerMap['totalSqWah'] = idx;
+        else if (/^ไร่$|rai/.test(h)) headerMap['rai'] = idx;
+        else if (/^งาน$|ngan/.test(h)) headerMap['ngan'] = idx;
+        else if (/^ตารางวา$|^วา$|sqwah/.test(h)) headerMap['sqWah'] = idx;
+        else if (/ไร่ละ|pricerai/.test(h)) headerMap['pricePerRai'] = idx;
+        else if (/ตารางวาละ|pricesqwah/.test(h)) headerMap['pricePerSqWah'] = idx;
+        else if (/ราคารวม|ราคาซื้อ|purchaseprice/.test(h)) headerMap['purchasePrice'] = idx;
+        else if (/ค่าธรรมเนียม|ค่าอากร|ภาษี|tax/.test(h)) headerMap['taxAndFees'] = idx;
+        else if (/ค่ารังวัด|survey/.test(h)) headerMap['surveyCost'] = idx;
+        else if (/ค่าใช้จ่ายอื่นๆ|otherexpenses/.test(h)) headerMap['otherExpenses'] = idx;
+        else if (/รวมทั้งสิ้น|รวมทั้งหมด|รวมต้นทุน|totalcost|cost/.test(h)) headerMap['totalCost'] = idx;
+        else if (/ราคาที่ตั้งใจจะขาย|ราคาขายเป้าหมาย|targetsale|target/.test(h)) headerMap['targetSalePrice'] = idx;
+        else if (/ราคาที่ขายได้|soldprice|sold/.test(h)) headerMap['soldPrice'] = idx;
+        else if (/คอมมิชชั่น|commission/.test(h)) headerMap['commissionFee'] = idx;
+        else if (/สุทธิ|netreceived|net/.test(h)) headerMap['netReceived'] = idx;
+        else if (/สถานะ|status/.test(h)) headerMap['status'] = idx;
+        else if (/หมายเหตุ|note|notes|remark/.test(h)) headerMap['notes'] = idx;
+      });
+      lineIndex = scanIdx + 1;
+
+      // Check if immediate next line is a sub-header (e.g. contains "ประเภท", "ไร่", "งาน", "ตารางวา")
+      if (lineIndex < rawLines.length) {
+        const nextTokens = tokenizeCsvLine(rawLines[lineIndex], delimiter);
+        const isSubHeader = nextTokens.some((tok) => /ประเภท|ตารางวา|คงเหลือ/i.test(tok));
+        if (isSubHeader) {
+          lineIndex++;
+        }
+      }
+      break;
+    }
   }
 
   // Iterate over data rows
@@ -185,11 +196,14 @@ export function parseCsvToPlots(csvText: string, startOrderNumber: number = 1): 
     if (!rawLine.trim()) continue;
 
     const cols = tokenizeCsvLine(rawLine, delimiter);
-    if (cols.length === 0 || cols.every((c) => !c)) continue;
+    // Ignore rows that are completely empty or just commas
+    if (cols.length === 0 || cols.every((c) => !c || c === '0' || c === '-')) {
+      const nonZeroCols = cols.filter((c) => c && c !== '0' && c !== '-');
+      if (nonZeroCols.length === 0) continue;
+    }
 
     result.totalRowsProcessed++;
 
-    // Helper to extract value either by headerMap or positional index
     const getVal = (field: string, fallbackIdx: number): string => {
       if (headerMap[field] !== undefined && headerMap[field] < cols.length) {
         return cols[headerMap[field]] || '';
@@ -201,22 +215,54 @@ export function parseCsvToPlots(csvText: string, startOrderNumber: number = 1): 
     };
 
     const orderRaw = parseNum(getVal('orderNumber', 0));
+    const titleVal = getVal('title', 3);
+    const deedVal = getVal('primaryDeedNumber', 8);
+    const mapsUrlVal = getVal('mapsUrl', 9);
+    const raiVal = parseNum(getVal('rai', 10));
+    const nganVal = parseNum(getVal('ngan', 11));
+    const sqWahVal = parseNum(getVal('sqWah', 12));
+
+    // Check if this row is a sub-parcel row belonging to the previous plot
+    // (i.e. orderNumber is empty and title is empty, but deed or area is present)
+    if (orderRaw === 0 && !titleVal && deedVal && result.plots.length > 0) {
+      const lastPlot = result.plots[result.plots.length - 1];
+      const spTotalSqWah = raiVal * 400 + nganVal * 100 + sqWahVal;
+      const { lat: spLat, lng: spLng } = extractCoords(mapsUrlVal);
+
+      if (!lastPlot.subParcels) {
+        lastPlot.subParcels = [];
+      }
+      lastPlot.subParcels.push({
+        id: `sp-${lastPlot.id}-${lastPlot.subParcels.length + 1}`,
+        deedNumber: deedVal,
+        rai: raiVal,
+        ngan: nganVal,
+        sqWah: sqWahVal,
+        totalSqWah: spTotalSqWah,
+        mapsUrl: mapsUrlVal,
+        latitude: spLat,
+        longitude: spLng,
+        notes: getVal('notes', 31),
+      });
+      continue;
+    }
+
     const assignedOrder = orderRaw > 0 ? orderRaw : orderSequence;
     orderSequence = Math.max(orderSequence, assignedOrder) + 1;
 
-    const title = getVal('title', 3) || getVal('title', 1) || `แปลงที่ดินลำดับ #${assignedOrder}`;
+    const title = titleVal || getVal('title', 1) || `แปลงที่ดินลำดับ #${assignedOrder}`;
     const purchaseDate = getVal('purchaseDate', 1) || new Date().toLocaleDateString('th-TH');
     const saleDate = getVal('saleDate', 2);
     const landType = getVal('landType', 4) || 'ที่ดินเปล่า';
     const subdistrict = getVal('subdistrict', 5);
     const district = getVal('district', 6);
     const province = getVal('province', 7) || 'นครสวรรค์';
-    const primaryDeedNumber = getVal('primaryDeedNumber', 8);
-    const mapsUrl = getVal('mapsUrl', 9);
+    const primaryDeedNumber = deedVal;
+    const mapsUrl = mapsUrlVal;
 
-    const rai = parseNum(getVal('rai', 10));
-    const ngan = parseNum(getVal('ngan', 11));
-    const sqWah = parseNum(getVal('sqWah', 12));
+    const rai = raiVal;
+    const ngan = nganVal;
+    const sqWah = sqWahVal;
 
     let totalSqWah = parseNum(getVal('totalSqWah', 14));
     if (totalSqWah === 0 && (rai > 0 || ngan > 0 || sqWah > 0)) {
@@ -228,24 +274,40 @@ export function parseCsvToPlots(csvText: string, startOrderNumber: number = 1): 
       totalRai = Number((totalSqWah / 400).toFixed(2));
     }
 
-    const pricePerRai = parseNum(getVal('pricePerRai', 15));
-    const pricePerSqWah = parseNum(getVal('pricePerSqWah', 16));
-    const purchasePrice = parseNum(getVal('purchasePrice', 17));
-    const taxAndFees = parseNum(getVal('taxAndFees', 18));
-    const surveyCost = parseNum(getVal('surveyCost', 19));
-    const otherExpenses = parseNum(getVal('otherExpenses', 20));
+    // Partial sales
+    const partiallySoldRai = parseNum(getVal('partiallySoldRai', 15));
+    const partiallySoldNgan = parseNum(getVal('partiallySoldNgan', 16));
+    const partiallySoldSqWah = parseNum(getVal('partiallySoldSqWah', 17));
+    let partiallySoldTotalSqWah = parseNum(getVal('partiallySoldTotalSqWah', 18));
+    if (partiallySoldTotalSqWah === 0 && (partiallySoldRai > 0 || partiallySoldNgan > 0 || partiallySoldSqWah > 0)) {
+      partiallySoldTotalSqWah = partiallySoldRai * 400 + partiallySoldNgan * 100 + partiallySoldSqWah;
+    }
 
-    let totalCost = parseNum(getVal('totalCost', 21));
+    let remainingSqWah = parseNum(getVal('remainingSqWah', 19));
+    if (remainingSqWah === 0 && partiallySoldTotalSqWah > 0) {
+      remainingSqWah = totalSqWah - partiallySoldTotalSqWah;
+    } else if (remainingSqWah === 0 && partiallySoldTotalSqWah === 0) {
+      remainingSqWah = totalSqWah;
+    }
+
+    const pricePerRai = parseNum(getVal('pricePerRai', 20));
+    const pricePerSqWah = parseNum(getVal('pricePerSqWah', 21));
+    const purchasePrice = parseNum(getVal('purchasePrice', 22));
+    const taxAndFees = parseNum(getVal('taxAndFees', 23));
+    const surveyCost = parseNum(getVal('surveyCost', 24));
+    const otherExpenses = parseNum(getVal('otherExpenses', 25));
+
+    let totalCost = parseNum(getVal('totalCost', 26));
     if (totalCost === 0) {
       totalCost = purchasePrice + taxAndFees + surveyCost + otherExpenses;
     }
 
-    const targetSalePrice = parseNum(getVal('targetSalePrice', 22));
-    const soldPrice = parseNum(getVal('soldPrice', 23));
-    const commissionFee = parseNum(getVal('commissionFee', 24));
-    const netReceived = parseNum(getVal('netReceived', 25));
-    const status = normalizeStatus(getVal('status', 26));
-    const notes = getVal('notes', 27);
+    const targetSalePrice = parseNum(getVal('targetSalePrice', 27));
+    const soldPrice = parseNum(getVal('soldPrice', 28));
+    const commissionFee = parseNum(getVal('commissionFee', 29));
+    const netReceived = parseNum(getVal('netReceived', 30));
+    const status = normalizeStatus(getVal('status', 31));
+    const notes = getVal('notes', 31);
 
     const { lat, lng } = extractCoords(mapsUrl);
 
@@ -268,6 +330,11 @@ export function parseCsvToPlots(csvText: string, startOrderNumber: number = 1): 
       sqWah,
       totalRai,
       totalSqWah,
+      partiallySoldRai,
+      partiallySoldNgan,
+      partiallySoldSqWah,
+      partiallySoldTotalSqWah,
+      remainingSqWah,
       pricePerRai,
       pricePerSqWah,
       purchasePrice,

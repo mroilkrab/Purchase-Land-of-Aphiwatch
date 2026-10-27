@@ -9,13 +9,42 @@ import {
 
 export { savePlotsToIndexedDB, loadPlotsFromIndexedDB, saveSettingsToIndexedDB, loadSettingsFromIndexedDB };
 
-const PLOTS_STORAGE_KEY = 'land_portfolio_plots_v1';
-const SETTINGS_STORAGE_KEY = 'land_portfolio_settings_v1';
+const PLOTS_STORAGE_KEY = 'land_portfolio_plots_v2';
+const SETTINGS_STORAGE_KEY = 'land_portfolio_settings_v2';
 
 export const loadPlotsFromStorage = (): LandPlot[] => {
   try {
     const raw = localStorage.getItem(PLOTS_STORAGE_KEY);
     if (!raw) {
+      // Check if previous v1 storage exists to preserve custom images/notes
+      const oldRaw = localStorage.getItem('land_portfolio_plots_v1');
+      if (oldRaw) {
+        try {
+          const oldPlots = JSON.parse(oldRaw);
+          if (Array.isArray(oldPlots) && oldPlots.length > 0) {
+            const merged = INITIAL_LAND_PLOTS.map((initPlot) => {
+              const matchedOld = oldPlots.find((op: LandPlot) => 
+                op.primaryDeedNumber === initPlot.primaryDeedNumber || 
+                op.orderNumber === initPlot.orderNumber
+              );
+              if (matchedOld) {
+                return {
+                  ...initPlot,
+                  images: matchedOld.images && matchedOld.images.length > 0 ? matchedOld.images : initPlot.images,
+                  documentChecklist: matchedOld.documentChecklist || initPlot.documentChecklist,
+                  quickNotes: matchedOld.quickNotes && matchedOld.quickNotes.length > 0 ? matchedOld.quickNotes : initPlot.quickNotes,
+                };
+              }
+              return initPlot;
+            });
+            savePlotsToStorage(merged);
+            return merged;
+          }
+        } catch (migErr) {
+          console.warn('Migration note:', migErr);
+        }
+      }
+
       savePlotsToStorage(INITIAL_LAND_PLOTS);
       return INITIAL_LAND_PLOTS;
     }
@@ -114,6 +143,26 @@ export const exportToJsonFile = (plots: LandPlot[], settings: PortfolioSettings)
 };
 
 export const exportToCsvFile = (plots: LandPlot[], settings: PortfolioSettings) => {
+  const purchaseSum = plots.reduce((acc, p) => acc + (p.purchasePrice || 0), 0);
+  const taxSum = plots.reduce((acc, p) => acc + (p.taxAndFees || 0), 0);
+  const surveySum = plots.reduce((acc, p) => acc + (p.surveyCost || 0), 0);
+  const otherSum = plots.reduce((acc, p) => acc + (p.otherExpenses || 0), 0);
+  const totalCostSum = plots.reduce((acc, p) => acc + (p.totalCost || 0), 0);
+
+  const lines: string[] = [];
+  // Row 1: Title
+  lines.push(`"${settings.portfolioTitle || 'รายละเอียดการซื้อที่ดิน - อภิวัชร์'}"`);
+
+  // Row 2: Totals row
+  const summaryRow = Array(32).fill('');
+  summaryRow[22] = `"${purchaseSum.toLocaleString('th-TH')}"`;
+  summaryRow[23] = `"${taxSum.toLocaleString('th-TH')}"`;
+  summaryRow[24] = `"${surveySum.toLocaleString('th-TH')}"`;
+  summaryRow[25] = `"${otherSum.toLocaleString('th-TH')}"`;
+  summaryRow[26] = `"${totalCostSum.toLocaleString('th-TH')}"`;
+  lines.push(summaryRow.join(','));
+
+  // Row 3: Main header
   const headers = [
     'ลำดับ',
     'วันที่ซื้อ',
@@ -130,7 +179,12 @@ export const exportToCsvFile = (plots: LandPlot[], settings: PortfolioSettings) 
     'ตารางวา',
     'รวมจำนวนที่ดิน(ไร่)',
     'รวมจำนวนที่ดิน(ตร.ว.)',
-    'ไร่ละ',
+    'ขายไป(ไร่)',
+    'ขายไป(งาน)',
+    'ขายไป(ตารางวา)',
+    'ขายไป(รวม ตร.ว.)',
+    'คงเหลือ(ตร.ว.)',
+    'ราคา(ไร่ละ)',
     'ตารางวาละ',
     'ราคารวม/ราคาซื้อ',
     'จ่ายค่าธรรมเนียม/ค่าอากร/ภาษี',
@@ -141,46 +195,121 @@ export const exportToCsvFile = (plots: LandPlot[], settings: PortfolioSettings) 
     'ราคาที่ขายได้',
     'ค่าคอมมิชชั่น',
     'สุทธิที่ได้รับ',
-    'สถานะ',
     'หมายเหตุเพิ่มเติม',
   ];
-
-  const lines: string[] = [];
-  lines.push(`"${settings.portfolioTitle || 'รายละเอียดการซื้อที่ดิน - อภิวัชร์'}"`);
   lines.push(headers.map((h) => `"${h}"`).join(','));
 
   plots.forEach((p) => {
-    const row = [
-      p.orderNumber,
-      `"${p.purchaseDate || ''}"`,
-      `"${p.saleDate || ''}"`,
-      `"${p.title || ''}"`,
-      `"${p.landType || ''}"`,
-      `"${p.subdistrict || ''}"`,
-      `"${p.district || ''}"`,
-      `"${p.province || ''}"`,
-      `"${p.primaryDeedNumber || ''}"`,
-      `"${p.mapsUrl || ''}"`,
-      p.rai,
-      p.ngan,
-      p.sqWah,
-      p.totalRai,
-      p.totalSqWah,
-      p.pricePerRai,
-      p.pricePerSqWah,
-      p.purchasePrice,
-      p.taxAndFees,
-      p.surveyCost,
-      p.otherExpenses,
-      p.totalCost,
-      p.targetSalePrice,
-      p.soldPrice,
-      p.commissionFee,
-      p.netReceived,
-      `"${p.status}"`,
-      `"${(p.notes || '').replace(/"/g, '""')}"`,
-    ];
-    lines.push(row.join(','));
+    if (p.subParcels && p.subParcels.length > 1) {
+      const first = p.subParcels[0];
+      lines.push([
+        p.orderNumber,
+        `"${p.purchaseDate || ''}"`,
+        `"${p.saleDate || ''}"`,
+        `"${p.title || ''}"`,
+        `"${p.landType || ''}"`,
+        `"${p.subdistrict || ''}"`,
+        `"${p.district || ''}"`,
+        `"${p.province || ''}"`,
+        `"${first.deedNumber || p.primaryDeedNumber || ''}"`,
+        `"${first.mapsUrl || p.mapsUrl || ''}"`,
+        first.rai,
+        first.ngan,
+        first.sqWah,
+        p.totalRai,
+        p.totalSqWah,
+        p.partiallySoldRai || 0,
+        p.partiallySoldNgan || 0,
+        p.partiallySoldSqWah || 0,
+        p.partiallySoldTotalSqWah || 0,
+        p.remainingSqWah ?? p.totalSqWah,
+        p.pricePerRai || '',
+        p.pricePerSqWah || '',
+        p.purchasePrice || '',
+        p.taxAndFees || '',
+        p.surveyCost || '',
+        p.otherExpenses || '',
+        p.totalCost || '',
+        p.targetSalePrice || '',
+        p.soldPrice || '',
+        p.commissionFee || '',
+        p.netReceived || '',
+        `"${(p.notes || '').replace(/"/g, '""')}"`,
+      ].join(','));
+
+      for (let i = 1; i < p.subParcels.length; i++) {
+        const sp = p.subParcels[i];
+        lines.push([
+          '',
+          '',
+          '',
+          '',
+          '',
+          `"${p.subdistrict || ''}"`,
+          `"${p.district || ''}"`,
+          `"${p.province || ''}"`,
+          `"${sp.deedNumber || ''}"`,
+          `"${sp.mapsUrl || ''}"`,
+          sp.rai,
+          sp.ngan,
+          sp.sqWah,
+          '',
+          sp.totalSqWah,
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          `"${(sp.notes || '').replace(/"/g, '""')}"`,
+        ].join(','));
+      }
+    } else {
+      lines.push([
+        p.orderNumber,
+        `"${p.purchaseDate || ''}"`,
+        `"${p.saleDate || ''}"`,
+        `"${p.title || ''}"`,
+        `"${p.landType || ''}"`,
+        `"${p.subdistrict || ''}"`,
+        `"${p.district || ''}"`,
+        `"${p.province || ''}"`,
+        `"${p.primaryDeedNumber || ''}"`,
+        `"${p.mapsUrl || ''}"`,
+        p.rai,
+        p.ngan,
+        p.sqWah,
+        p.totalRai,
+        p.totalSqWah,
+        p.partiallySoldRai || 0,
+        p.partiallySoldNgan || 0,
+        p.partiallySoldSqWah || 0,
+        p.partiallySoldTotalSqWah || 0,
+        p.remainingSqWah ?? p.totalSqWah,
+        p.pricePerRai || '',
+        p.pricePerSqWah || '',
+        p.purchasePrice || '',
+        p.taxAndFees || '',
+        p.surveyCost || '',
+        p.otherExpenses || '',
+        p.totalCost || '',
+        p.targetSalePrice || '',
+        p.soldPrice || '',
+        p.commissionFee || '',
+        p.netReceived || '',
+        `"${(p.notes || '').replace(/"/g, '""')}"`,
+      ].join(','));
+    }
   });
 
   const csvContent = '\uFEFF' + lines.join('\r\n');

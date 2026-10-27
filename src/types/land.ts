@@ -64,6 +64,13 @@ export interface LandPlot {
   totalRai: number; // รวมจำนวนที่ดิน (ไร่) คำนวณเป็นทศนิยม
   totalSqWah: number; // รวมจำนวนที่ดิน (ตร.ว.)
   
+  // Partial sales & remaining area (ขายไปบางส่วน และ คงเหลือ)
+  partiallySoldRai?: number;
+  partiallySoldNgan?: number;
+  partiallySoldSqWah?: number;
+  partiallySoldTotalSqWah?: number;
+  remainingSqWah?: number;
+  
   // Sub parcels (โฉนดย่อยในแปลงเดียวกัน)
   subParcels?: SubParcel[];
   

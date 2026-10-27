@@ -99,7 +99,7 @@ export interface LandTaxCalculationResult {
  */
 export const inferDefaultTaxUsage = (landType?: string): LandTaxUsageType => {
   if (!landType) return 'vacant';
-  const t = landType.toLowerCase();
+  const t = String(landType).toLowerCase();
   if (t.includes('บ้าน') || t.includes('ทาวน์') || t.includes('คอนโด')) {
     return 'residential_other';
   }

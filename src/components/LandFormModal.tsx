@@ -62,120 +62,126 @@ export const LandFormModal: React.FC<LandFormModalProps> = ({
 }) => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [autoSyncSheet, setAutoSyncSheet] = useState<boolean>(true);
-  const [formData, setFormData] = useState<Partial<LandPlot>>({
-    orderNumber: nextOrderNumber,
-    purchaseDate: '',
-    saleDate: '',
-    title: '',
-    landType: 'ที่ดินเปล่า',
-    subdistrict: '',
-    district: '',
-    province: 'นครสวรรค์',
-    primaryDeedNumber: '',
-    mapsUrl: '',
-    rai: 0,
-    ngan: 0,
-    sqWah: 0,
-    totalRai: 0,
-    totalSqWah: 0,
-    pricePerRai: 0,
-    pricePerSqWah: 0,
-    purchasePrice: 0,
-    taxAndFees: 0,
-    surveyCost: 0,
-    otherExpenses: 0,
-    totalCost: 0,
-    targetSalePrice: 0,
-    soldPrice: 0,
-    commissionFee: 0,
-    netReceived: 0,
-    status: 'holding',
-    notes: '',
-    subParcels: [],
-    images: [],
-  });
+
+  const getInitialFormData = (data?: LandPlot | null, nextOrder: number = 1): Partial<LandPlot> => {
+    if (data) {
+      return {
+        ...data,
+        id: data.id,
+        orderNumber: Number(data.orderNumber) || nextOrder,
+        purchaseDate: data.purchaseDate || '',
+        saleDate: data.saleDate || '',
+        title: data.title || '',
+        landType: data.landType || 'ที่ดินเปล่า',
+        subdistrict: data.subdistrict || '',
+        district: data.district || '',
+        province: data.province || 'นครสวรรค์',
+        primaryDeedNumber: data.primaryDeedNumber || '',
+        mapsUrl: data.mapsUrl || '',
+        latitude: data.latitude,
+        longitude: data.longitude,
+        rai: Number(data.rai) || 0,
+        ngan: Number(data.ngan) || 0,
+        sqWah: Number(data.sqWah) || 0,
+        totalRai: Number(data.totalRai) || 0,
+        totalSqWah: Number(data.totalSqWah) || 0,
+        pricePerRai: Number(data.pricePerRai) || 0,
+        pricePerSqWah: Number(data.pricePerSqWah) || 0,
+        purchasePrice: Number(data.purchasePrice) || 0,
+        taxAndFees: Number(data.taxAndFees) || 0,
+        surveyCost: Number(data.surveyCost) || 0,
+        otherExpenses: Number(data.otherExpenses) || 0,
+        totalCost: Number(data.totalCost) || 0,
+        targetSalePrice: Number(data.targetSalePrice) || 0,
+        soldPrice: Number(data.soldPrice) || 0,
+        commissionFee: Number(data.commissionFee) || 0,
+        netReceived: Number(data.netReceived) || 0,
+        partiallySoldRai: Number(data.partiallySoldRai) || 0,
+        partiallySoldNgan: Number(data.partiallySoldNgan) || 0,
+        partiallySoldSqWah: Number(data.partiallySoldSqWah) || 0,
+        partiallySoldTotalSqWah: Number(data.partiallySoldTotalSqWah) || 0,
+        remainingSqWah: data.remainingSqWah !== undefined && data.remainingSqWah !== null
+          ? Number(data.remainingSqWah)
+          : (Number(data.totalSqWah) || 0),
+        status: data.status || 'holding',
+        notes: data.notes || '',
+        subParcels: Array.isArray(data.subParcels)
+          ? data.subParcels.map((sp) => ({
+              id: sp.id || `sp-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+              deedNumber: sp.deedNumber || '',
+              rai: Number(sp.rai) || 0,
+              ngan: Number(sp.ngan) || 0,
+              sqWah: Number(sp.sqWah) || 0,
+              totalSqWah: Number(sp.totalSqWah) || 0,
+              mapsUrl: sp.mapsUrl || '',
+              latitude: sp.latitude,
+              longitude: sp.longitude,
+              notes: sp.notes || '',
+            }))
+          : [],
+        images: Array.isArray(data.images) ? [...data.images] : [],
+        appraisalPrice: data.appraisalPrice !== undefined && data.appraisalPrice !== null ? Number(data.appraisalPrice) : undefined,
+        taxUsageType: data.taxUsageType,
+        isIndividualOwner: data.isIndividualOwner !== false,
+        vacantConsecutiveYears: Number(data.vacantConsecutiveYears) || 0,
+      };
+    }
+    return {
+      id: `plot-${Date.now()}`,
+      orderNumber: nextOrder,
+      purchaseDate: new Date().toLocaleDateString('th-TH'),
+      saleDate: '',
+      title: '',
+      landType: 'ที่ดินเปล่า',
+      subdistrict: '',
+      district: '',
+      province: 'นครสวรรค์',
+      primaryDeedNumber: '',
+      mapsUrl: '',
+      rai: 0,
+      ngan: 0,
+      sqWah: 0,
+      totalRai: 0,
+      totalSqWah: 0,
+      pricePerRai: 0,
+      pricePerSqWah: 0,
+      purchasePrice: 0,
+      taxAndFees: 0,
+      surveyCost: 0,
+      otherExpenses: 0,
+      totalCost: 0,
+      targetSalePrice: 0,
+      soldPrice: 0,
+      commissionFee: 0,
+      netReceived: 0,
+      partiallySoldRai: 0,
+      partiallySoldNgan: 0,
+      partiallySoldSqWah: 0,
+      partiallySoldTotalSqWah: 0,
+      remainingSqWah: 0,
+      status: 'holding',
+      notes: '',
+      subParcels: [],
+      images: [],
+      isIndividualOwner: true,
+      vacantConsecutiveYears: 0,
+    };
+  };
+
+  const [formData, setFormData] = useState<Partial<LandPlot>>(() => getInitialFormData(initialData, nextOrderNumber));
   const [formError, setFormError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (initialData) {
-      setFormData({
-        ...initialData,
-        orderNumber: Number(initialData.orderNumber) || nextOrderNumber,
-        purchaseDate: initialData.purchaseDate || '',
-        saleDate: initialData.saleDate || '',
-        title: initialData.title || '',
-        landType: initialData.landType || 'ที่ดินเปล่า',
-        subdistrict: initialData.subdistrict || '',
-        district: initialData.district || '',
-        province: initialData.province || 'นครสวรรค์',
-        primaryDeedNumber: initialData.primaryDeedNumber || '',
-        mapsUrl: initialData.mapsUrl || '',
-        latitude: initialData.latitude,
-        longitude: initialData.longitude,
-        rai: Number(initialData.rai) || 0,
-        ngan: Number(initialData.ngan) || 0,
-        sqWah: Number(initialData.sqWah) || 0,
-        totalRai: Number(initialData.totalRai) || 0,
-        totalSqWah: Number(initialData.totalSqWah) || 0,
-        pricePerRai: Number(initialData.pricePerRai) || 0,
-        pricePerSqWah: Number(initialData.pricePerSqWah) || 0,
-        purchasePrice: Number(initialData.purchasePrice) || 0,
-        taxAndFees: Number(initialData.taxAndFees) || 0,
-        surveyCost: Number(initialData.surveyCost) || 0,
-        otherExpenses: Number(initialData.otherExpenses) || 0,
-        totalCost: Number(initialData.totalCost) || 0,
-        targetSalePrice: Number(initialData.targetSalePrice) || 0,
-        soldPrice: Number(initialData.soldPrice) || 0,
-        commissionFee: Number(initialData.commissionFee) || 0,
-        netReceived: Number(initialData.netReceived) || 0,
-        partiallySoldRai: Number(initialData.partiallySoldRai) || 0,
-        partiallySoldNgan: Number(initialData.partiallySoldNgan) || 0,
-        partiallySoldSqWah: Number(initialData.partiallySoldSqWah) || 0,
-        partiallySoldTotalSqWah: Number(initialData.partiallySoldTotalSqWah) || 0,
-        remainingSqWah: initialData.remainingSqWah !== undefined ? Number(initialData.remainingSqWah) : Number(initialData.totalSqWah) || 0,
-        status: initialData.status || 'holding',
-        notes: initialData.notes || '',
-        subParcels: initialData.subParcels ? [...initialData.subParcels] : [],
-        images: initialData.images ? [...initialData.images] : [],
-      });
-    } else {
-      setFormData({
-        id: `plot-${Date.now()}`,
-        orderNumber: nextOrderNumber,
-        purchaseDate: new Date().toLocaleDateString('th-TH'),
-        saleDate: '',
-        title: '',
-        landType: 'ที่ดินเปล่า',
-        subdistrict: '',
-        district: '',
-        province: 'นครสวรรค์',
-        primaryDeedNumber: '',
-        mapsUrl: '',
-        rai: 0,
-        ngan: 0,
-        sqWah: 0,
-        totalRai: 0,
-        totalSqWah: 0,
-        pricePerRai: 0,
-        pricePerSqWah: 0,
-        purchasePrice: 0,
-        taxAndFees: 0,
-        surveyCost: 0,
-        otherExpenses: 0,
-        totalCost: 0,
-        targetSalePrice: 0,
-        soldPrice: 0,
-        commissionFee: 0,
-        netReceived: 0,
-        status: 'holding',
-        notes: '',
-        subParcels: [],
-        images: [],
-      });
-    }
+    setFormData(getInitialFormData(initialData, nextOrderNumber));
   }, [initialData, nextOrderNumber, isOpen]);
 
   if (!isOpen) return null;
+
+  const safeLocaleNumber = (val: any): string => {
+    const num = Number(val);
+    if (isNaN(num)) return '0';
+    return num.toLocaleString('th-TH');
+  };
 
   // Auto-calculation functions
   const recalculateAreaAndPrices = (updates: Partial<LandPlot>) => {
@@ -602,14 +608,14 @@ export const LandFormModal: React.FC<LandFormModalProps> = ({
               <div className="bg-slate-800/80 p-2.5 rounded-lg border border-slate-700/80">
                 <span className="text-[10px] text-slate-400 block">รวมจำนวนที่ดิน (ไร่):</span>
                 <span className="text-sm font-bold text-amber-400 font-mono">
-                  {formData.totalRai || 0} ไร่
+                  {Number(formData.totalRai || 0)} ไร่
                 </span>
               </div>
 
               <div className="bg-slate-800/80 p-2.5 rounded-lg border border-slate-700/80">
                 <span className="text-[10px] text-slate-400 block">รวมจำนวนที่ดิน (ตร.ว.):</span>
                 <span className="text-sm font-bold text-amber-300 font-mono">
-                  {formData.totalSqWah?.toLocaleString('th-TH') || 0} ตร.ว.
+                  {safeLocaleNumber(formData.totalSqWah)} ตร.ว.
                 </span>
               </div>
             </div>
@@ -691,13 +697,17 @@ export const LandFormModal: React.FC<LandFormModalProps> = ({
                 <div className="bg-slate-800/80 p-2 rounded-lg border border-slate-700/80">
                   <span className="text-[10px] text-slate-400 block">ขายไปรวม (ตร.ว.):</span>
                   <span className="text-xs font-bold text-amber-400 font-mono">
-                    {(formData.partiallySoldTotalSqWah || 0).toLocaleString('th-TH')} ตร.ว.
+                    {safeLocaleNumber(formData.partiallySoldTotalSqWah)} ตร.ว.
                   </span>
                 </div>
                 <div className="bg-slate-800/80 p-2 rounded-lg border border-slate-700/80">
                   <span className="text-[10px] text-slate-400 block">เนื้อที่คงเหลือ:</span>
                   <span className="text-xs font-bold text-emerald-400 font-mono">
-                    {((formData.remainingSqWah !== undefined) ? formData.remainingSqWah : (formData.totalSqWah || 0)).toLocaleString('th-TH')} ตร.ว.
+                    {safeLocaleNumber(
+                      formData.remainingSqWah !== undefined && formData.remainingSqWah !== null
+                        ? formData.remainingSqWah
+                        : (formData.totalSqWah || 0)
+                    )} ตร.ว.
                   </span>
                 </div>
               </div>
@@ -737,7 +747,7 @@ export const LandFormModal: React.FC<LandFormModalProps> = ({
                         <input
                           type="text"
                           placeholder="เลขที่ดิน เช่น 140847"
-                          value={sp.deedNumber}
+                          value={sp.deedNumber || ''}
                           onChange={(e) => handleSubParcelUpdate(sp.id, { deedNumber: e.target.value })}
                           className="w-full px-2 py-1 bg-slate-800 border border-slate-700 rounded text-xs text-slate-200 font-mono"
                         />
@@ -746,7 +756,7 @@ export const LandFormModal: React.FC<LandFormModalProps> = ({
                         <input
                           type="number"
                           placeholder="ไร่"
-                          value={sp.rai}
+                          value={sp.rai ?? 0}
                           onChange={(e) => handleSubParcelUpdate(sp.id, { rai: Number(e.target.value) })}
                           className="w-14 px-2 py-1 bg-slate-800 border border-slate-700 rounded text-xs text-slate-200 font-mono"
                         />
@@ -835,18 +845,18 @@ export const LandFormModal: React.FC<LandFormModalProps> = ({
               <div>
                 <span className="text-xs text-blue-300 font-medium">รวมทั้งสิ้น / ต้นทุนสุทธิทั้งหมด (Total Cost)</span>
                 <div className="text-xl sm:text-2xl font-bold text-white font-mono mt-0.5">
-                  {formData.totalCost?.toLocaleString('th-TH')} บาท
+                  {safeLocaleNumber(formData.totalCost)} บาท
                 </div>
               </div>
 
               <div className="flex gap-4 text-xs font-mono text-slate-300">
                 <div>
                   <span className="text-slate-500 block">เฉลี่ยไร่ละ:</span>
-                  <span className="text-slate-200 font-semibold">{formData.pricePerRai?.toLocaleString('th-TH')} ฿</span>
+                  <span className="text-slate-200 font-semibold">{safeLocaleNumber(formData.pricePerRai)} ฿</span>
                 </div>
                 <div>
                   <span className="text-slate-500 block">เฉลี่ยตารางวาละ:</span>
-                  <span className="text-slate-200 font-semibold">{formData.pricePerSqWah?.toLocaleString('th-TH')} ฿</span>
+                  <span className="text-slate-200 font-semibold">{safeLocaleNumber(formData.pricePerSqWah)} ฿</span>
                 </div>
               </div>
             </div>
@@ -963,24 +973,24 @@ export const LandFormModal: React.FC<LandFormModalProps> = ({
                   )}
                 </div>
                 <div className="text-xl sm:text-2xl font-bold font-mono text-white flex items-baseline gap-2">
-                  {liveTaxResult.annualTax === 0 ? (
+                  {!liveTaxResult || liveTaxResult.annualTax === 0 ? (
                     <span className="text-emerald-400">0 ฿ / ปี</span>
                   ) : (
                     <span className="text-rose-300">{formatCurrency(liveTaxResult.annualTax)} / ปี</span>
                   )}
                   <span className="text-xs font-normal text-slate-400">
-                    (เฉลี่ย {formatCurrency(liveTaxResult.monthlyTax)} / เดือน)
+                    (เฉลี่ย {formatCurrency(liveTaxResult?.monthlyTax ?? 0)} / เดือน)
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-400">
-                  {liveTaxResult.lawNote} • ฐานภาษี: {formatCurrency(liveTaxResult.taxableBase)} • อัตราภาษีแท้จริง: {liveTaxResult.effectiveRatePercent.toFixed(3)}%
+                  {liveTaxResult?.lawNote || ''} • ฐานภาษี: {formatCurrency(liveTaxResult?.taxableBase ?? 0)} • อัตราภาษีแท้จริง: {Number(liveTaxResult?.effectiveRatePercent || 0).toFixed(3)}%
                 </p>
               </div>
 
               <div className="text-right shrink-0">
                 <div className="text-[10px] text-slate-400">ประเภทตามแบบ ภ.ด.ส.</div>
                 <div className="text-xs font-semibold text-slate-200 mt-0.5">
-                  {TAX_USAGE_CONFIGS[liveTaxResult.usageType]?.shortLabel || 'ทั่วไป/รกร้าง'}
+                  {(liveTaxResult && TAX_USAGE_CONFIGS[liveTaxResult.usageType]?.shortLabel) || 'ทั่วไป/รกร้าง'}
                 </div>
               </div>
             </div>

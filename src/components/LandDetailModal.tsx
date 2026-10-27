@@ -1139,14 +1139,14 @@ export const LandDetailModal: React.FC<LandDetailModalProps> = ({
                       <div className="text-amber-300 flex items-center justify-between">
                         <span>ขายไปบางส่วน:</span>
                         <span className="font-mono font-bold">
-                          {formatThaiArea(plot.partiallySoldRai || 0, plot.partiallySoldNgan || 0, plot.partiallySoldSqWah || 0)} ({plot.partiallySoldTotalSqWah.toLocaleString('th-TH')} ตร.ว.)
+                          {formatThaiArea(plot.partiallySoldRai || 0, plot.partiallySoldNgan || 0, plot.partiallySoldSqWah || 0)} ({Number(plot.partiallySoldTotalSqWah ?? 0).toLocaleString('th-TH')} ตร.ว.)
                         </span>
                       </div>
-                      {plot.remainingSqWah !== undefined && (
+                      {plot.remainingSqWah !== undefined && plot.remainingSqWah !== null && (
                         <div className="text-emerald-300 flex items-center justify-between font-semibold">
                           <span>คงเหลือปัจจุบัน:</span>
                           <span className="font-mono font-bold">
-                            {formatThaiArea(Math.floor(plot.remainingSqWah / 400), Math.floor((plot.remainingSqWah % 400) / 100), (plot.remainingSqWah % 400) % 100)} ({plot.remainingSqWah.toLocaleString('th-TH')} ตร.ว.)
+                            {formatThaiArea(Math.floor(Number(plot.remainingSqWah) / 400), Math.floor((Number(plot.remainingSqWah) % 400) / 100), (Number(plot.remainingSqWah) % 400) % 100)} ({Number(plot.remainingSqWah).toLocaleString('th-TH')} ตร.ว.)
                           </span>
                         </div>
                       )}

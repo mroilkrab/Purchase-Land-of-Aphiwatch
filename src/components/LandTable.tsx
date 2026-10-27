@@ -1002,11 +1002,11 @@ export const LandTable: React.FC<LandTableProps> = ({
                       <div className="p-2.5 rounded-xl bg-slate-800/50 border border-slate-800">
                         <span className="text-slate-400 block text-[11px]">รวมตารางวา</span>
                         <span className="font-semibold text-amber-400 font-mono">
-                          {plot.totalSqWah.toLocaleString('th-TH')} ตร.ว.
+                          {Number(plot.totalSqWah ?? 0).toLocaleString('th-TH')} ตร.ว.
                         </span>
-                        {plot.remainingSqWah !== undefined && plot.partiallySoldTotalSqWah && plot.partiallySoldTotalSqWah > 0 ? (
+                        {plot.remainingSqWah !== undefined && plot.remainingSqWah !== null && plot.partiallySoldTotalSqWah && plot.partiallySoldTotalSqWah > 0 ? (
                           <span className="text-[10px] text-emerald-400 font-semibold block mt-0.5">
-                            คงเหลือ {plot.remainingSqWah.toLocaleString('th-TH')} ตร.ว.
+                            คงเหลือ {Number(plot.remainingSqWah).toLocaleString('th-TH')} ตร.ว.
                           </span>
                         ) : null}
                       </div>
@@ -1326,10 +1326,10 @@ export const LandTable: React.FC<LandTableProps> = ({
                             ) : null}
                           </td>
                           <td className="py-3 px-3 text-right font-mono text-slate-300">
-                            <div>{plot.totalSqWah.toLocaleString('th-TH')}</div>
-                            {plot.remainingSqWah !== undefined && plot.partiallySoldTotalSqWah && plot.partiallySoldTotalSqWah > 0 && (
+                            <div>{Number(plot.totalSqWah ?? 0).toLocaleString('th-TH')}</div>
+                            {plot.remainingSqWah !== undefined && plot.remainingSqWah !== null && plot.partiallySoldTotalSqWah && plot.partiallySoldTotalSqWah > 0 && (
                               <div className="text-[10px] text-emerald-400 font-sans font-semibold">
-                                เหลือ {plot.remainingSqWah.toLocaleString('th-TH')} ตร.ว.
+                                เหลือ {Number(plot.remainingSqWah).toLocaleString('th-TH')} ตร.ว.
                               </div>
                             )}
                           </td>

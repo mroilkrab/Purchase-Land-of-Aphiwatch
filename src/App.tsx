@@ -24,6 +24,7 @@ import { LiveArtifactView } from './components/LiveArtifactView';
 import { SettingsAndBackup } from './components/SettingsAndBackup';
 import { LandFormModal } from './components/LandFormModal';
 import { LandDetailModal } from './components/LandDetailModal';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
 
 export default function App() {
@@ -470,44 +471,63 @@ export default function App() {
       </main>
 
       {/* Form Modal (Add / Edit) */}
-      <LandFormModal
-        isOpen={isFormOpen}
-        onClose={() => {
-          setIsFormOpen(false);
-          setEditingPlot(null);
-        }}
-        onSave={handleSavePlot}
-        onDelete={handleDeletePlot}
-        initialData={editingPlot}
-        nextOrderNumber={nextOrderNumber}
-        isGoogleAuthed={!!user}
-        googleSheetId={settings.googleSheetId}
-        onLoginGoogle={handleLogin}
-        isSyncingSheet={isSyncingSheet}
-        sheetSyncStatus={sheetSyncStatus}
-      />
+      {isFormOpen && (
+        <ErrorBoundary
+          fallbackTitle="เกิดข้อผิดพลาดในการเปิดฟอร์มแก้ไขแปลงที่ดิน"
+          onReset={() => {
+            setIsFormOpen(false);
+            setEditingPlot(null);
+          }}
+        >
+          <LandFormModal
+            key={editingPlot ? editingPlot.id : `new-${nextOrderNumber}`}
+            isOpen={isFormOpen}
+            onClose={() => {
+              setIsFormOpen(false);
+              setEditingPlot(null);
+            }}
+            onSave={handleSavePlot}
+            onDelete={handleDeletePlot}
+            initialData={editingPlot}
+            nextOrderNumber={nextOrderNumber}
+            isGoogleAuthed={!!user}
+            googleSheetId={settings.googleSheetId}
+            onLoginGoogle={handleLogin}
+            isSyncingSheet={isSyncingSheet}
+            sheetSyncStatus={sheetSyncStatus}
+          />
+        </ErrorBoundary>
+      )}
 
       {/* Detail Modal */}
-      <LandDetailModal
-        plot={selectedPlotForDetail}
-        onClose={() => setSelectedPlotForDetail(null)}
-        onEdit={(plot) => {
-          setSelectedPlotForDetail(null);
-          setEditingPlot(plot);
-          setIsFormOpen(true);
-        }}
-        onDelete={(plot) => {
-          handleDeletePlot(plot.id);
-        }}
-        onSimulate={(plot) => {
-          setSelectedPlotForDetail(null);
-          setActiveTab('simulator');
-        }}
-        onUpdatePlot={handleSavePlot}
-        settings={settings}
-        user={user}
-        onLoginGoogle={handleLogin}
-      />
+      {selectedPlotForDetail && (
+        <ErrorBoundary
+          fallbackTitle="เกิดข้อผิดพลาดในการเปิดหน้ารายละเอียดแปลงที่ดิน"
+          onReset={() => setSelectedPlotForDetail(null)}
+        >
+          <LandDetailModal
+            key={selectedPlotForDetail.id}
+            plot={selectedPlotForDetail}
+            onClose={() => setSelectedPlotForDetail(null)}
+            onEdit={(plot) => {
+              setSelectedPlotForDetail(null);
+              setEditingPlot(plot);
+              setIsFormOpen(true);
+            }}
+            onDelete={(plot) => {
+              handleDeletePlot(plot.id);
+            }}
+            onSimulate={(plot) => {
+              setSelectedPlotForDetail(null);
+              setActiveTab('simulator');
+            }}
+            onUpdatePlot={handleSavePlot}
+            settings={settings}
+            user={user}
+            onLoginGoogle={handleLogin}
+          />
+        </ErrorBoundary>
+      )}
 
       {/* Toast Notification */}
       {toastMessage && (

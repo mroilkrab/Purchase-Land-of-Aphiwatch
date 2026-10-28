@@ -98,7 +98,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     filteredPlots.forEach((p) => {
       const cost = Number(p.totalCost) || 0;
       const purchase = Number(p.purchasePrice) || 0;
-      const target = Number(p.targetSalePrice) || (cost * 1.3);
+      const target = Number(p.targetSalePrice) || 0;
       const sold = Number(p.soldPrice) || 0;
       const net = Number(p.netReceived) || sold;
       const sqw = Number(p.totalSqWah) || 0;
@@ -106,21 +106,20 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       totalCost += cost;
       totalPurchase += purchase;
       totalSqWah += sqw;
+      totalTargetSale += target;
 
       if (p.status === 'sold') {
         totalRealizedSales += sold;
         totalRealizedCost += cost;
         totalRealizedProfit += (net > 0 ? net : sold) - cost;
-      } else {
-        totalTargetSale += target;
       }
     });
 
-    const activePlotsCost = filteredPlots
-      .filter((p) => p.status !== 'sold')
-      .reduce((sum, p) => sum + (Number(p.totalCost) || 0), 0);
+    const activePlots = filteredPlots.filter((p) => p.status !== 'sold');
+    const activePlotsCost = activePlots.reduce((sum, p) => sum + (Number(p.totalCost) || 0), 0);
+    const activePlotsTarget = activePlots.reduce((sum, p) => sum + (Number(p.targetSalePrice) || 0), 0);
 
-    const projectedUnrealizedProfit = totalTargetSale - activePlotsCost;
+    const projectedUnrealizedProfit = activePlotsTarget > 0 ? activePlotsTarget - activePlotsCost : (totalTargetSale > 0 ? totalTargetSale - totalCost : 0);
     const overallROI = totalCost > 0 ? ((totalRealizedProfit + projectedUnrealizedProfit) / totalCost) * 100 : 0;
 
     return {
@@ -184,12 +183,13 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       const sqw = Number(p.totalSqWah) || 0;
       const sold = Number(p.soldPrice) || 0;
       const net = Number(p.netReceived) || sold;
-      const target = Number(p.targetSalePrice) || (cost * 1.3);
+      const target = Number(p.targetSalePrice) || 0;
 
       item.totalCost += cost;
       item.purchasePrice += purchase;
       item.otherCosts += other;
       item.totalSqWah += sqw;
+      item.targetSalePrice += target;
 
       if (p.status === 'sold') {
         item.soldCount += 1;
@@ -199,8 +199,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         if (p.status === 'consignment') item.consignmentCount += 1;
         else item.holdingCount += 1;
 
-        item.targetSalePrice += target;
-        item.projectedProfit += (target - cost);
+        item.projectedProfit += target > 0 ? (target - cost) : 0;
       }
     });
 
@@ -247,19 +246,19 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       const sqw = Number(p.totalSqWah) || 0;
       const sold = Number(p.soldPrice) || 0;
       const net = Number(p.netReceived) || sold;
-      const target = Number(p.targetSalePrice) || (cost * 1.3);
+      const target = Number(p.targetSalePrice) || 0;
 
       item.totalCost += cost;
       item.purchasePrice += purchase;
       item.otherCosts += other;
       item.totalSqWah += sqw;
+      item.targetSalePrice += target;
 
       if (p.status === 'sold') {
         item.realizedSales += sold;
         item.realizedProfit += (net > 0 ? net : sold) - cost;
       } else {
-        item.targetSalePrice += target;
-        item.projectedProfit += (target - cost);
+        item.projectedProfit += target > 0 ? (target - cost) : 0;
       }
     });
 
@@ -309,15 +308,16 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
       // Safe, high-contrast, pure white html2canvas execution
       const canvas = await html2canvas(element, {
-        scale: 2.2,
+        scale: 2.0,
         useCORS: true,
         allowTaint: false,
         logging: false,
         backgroundColor: '#ffffff', // PURE WHITE! Eliminates dark toner bloat!
-        windowWidth: 1200,
+        windowWidth: 1100,
         ignoreElements: (el) => 
           el.classList?.contains('no-print') || 
           el.classList?.contains('print:hidden') || 
+          el.classList?.contains('management-control') ||
           el.tagName === 'BUTTON' ||
           el.id === 'pdf-toast-container' ||
           el.getAttribute('role') === 'alert',
@@ -806,7 +806,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         </div>
 
         {/* Report Section Tabs */}
-        <div className={`flex border-b space-x-4 print:hidden ${paperPrintMode ? 'border-slate-300' : 'border-slate-800'}`}>
+        <div className={`flex border-b space-x-4 print:hidden no-print management-control ${paperPrintMode ? 'border-slate-300' : 'border-slate-800'}`}>
           <button
             onClick={() => setReportSubTab('landType')}
             className={`py-2 px-1 text-xs sm:text-sm font-semibold border-b-2 transition-colors cursor-pointer ${

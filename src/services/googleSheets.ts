@@ -347,7 +347,8 @@ export const updateExistingGoogleSheet = async (
   const sheetTitle = await getFirstSheetTitle(accessToken, cleanId);
   const values = formatLandPlotsForSheet(plots, settings);
 
-  const clearRange = `'${sheetTitle}'!A1:Z1000`;
+  // Clear all columns (including column AB KPI target and all financial columns) up to row 5000
+  const clearRange = `'${sheetTitle}'!A1:ZZ5000`;
   const targetRange = `'${sheetTitle}'!A1`;
 
   // 2. Clear existing content in the sheet

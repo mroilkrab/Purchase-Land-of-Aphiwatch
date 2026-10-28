@@ -243,29 +243,38 @@ html.light .leaflet-popup-tip {
 /* Print Styles for reliable browser printing & high-contrast black ink / monochrome paper output */
 @media print {
   @page {
-    size: A4 portrait;
-    margin: 12mm 10mm 15mm 10mm;
+    size: A4 landscape;
+    margin: 8mm 8mm 10mm 8mm;
     @bottom-right {
       content: "หน้า " counter(page) " จาก " counter(pages);
-      font-size: 8.5pt;
+      font-size: 8pt;
       font-family: 'Sarabun', 'Prompt', 'Noto Sans Thai', sans-serif;
       color: #334155;
       font-weight: 600;
     }
     @bottom-left {
       content: "ระบบบริหารจัดการพอร์ตที่ดิน (Land Portfolio Management)";
-      font-size: 8pt;
+      font-size: 7.5pt;
       font-family: 'Sarabun', 'Prompt', 'Noto Sans Thai', sans-serif;
       color: #64748b;
     }
+  }
+
+  main {
+    max-width: 100% !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
   }
 
   html, body, #root, .app-container {
     background: #ffffff !important;
     background-color: #ffffff !important;
     color: #000000 !important;
-    font-size: 9.5pt !important;
+    font-size: 9pt !important;
     width: 100% !important;
+    max-width: 100% !important;
+    overflow: visible !important;
     margin: 0 !important;
     padding: 0 !important;
     font-family: 'Sarabun', 'Prompt', 'Noto Sans Thai', sans-serif !important;
@@ -279,7 +288,7 @@ html.light .leaflet-popup-tip {
     text-shadow: none !important;
   }
 
-  /* Hide navigation, headers, buttons, toasts, modals backdrop, and interactive toolbars */
+  /* Hide navigation, headers, buttons, toasts, modals backdrop, sticky action columns, and interactive toolbars */
   nav,
   header,
   button,
@@ -287,9 +296,13 @@ html.light .leaflet-popup-tip {
   [class*="print:hidden"],
   #navbar-root,
   .no-print,
+  .management-control,
+  [class*="management-control"],
+  .sticky,
   #pdf-toast-container,
   [role="alert"] {
     display: none !important;
+    visibility: hidden !important;
   }
 
   /* Expand print report container */
@@ -308,6 +321,14 @@ html.light .leaflet-popup-tip {
     background-color: #ffffff !important;
     color: #000000 !important;
     font-family: 'Sarabun', 'Prompt', 'Noto Sans Thai', sans-serif !important;
+    box-sizing: border-box !important;
+  }
+
+  #printable-land-table-report table {
+    width: 100% !important;
+    max-width: 100% !important;
+    table-layout: fixed !important;
+    border-collapse: collapse !important;
   }
 
   /* Discrete A4 page structure for multi-page PDF & paper print */
@@ -383,9 +404,12 @@ html.light .leaflet-popup-tip {
   /* Table styles for print: crisp borders, clear rows, high-contrast black ink */
   table {
     width: 100% !important;
+    max-width: 100% !important;
     border-collapse: collapse !important;
-    border: 1.5px solid #475569 !important;
+    border: 1px solid #475569 !important;
     page-break-inside: auto;
+    table-layout: auto !important;
+    box-sizing: border-box !important;
   }
 
   tr {

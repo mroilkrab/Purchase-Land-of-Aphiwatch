@@ -1,4 +1,6 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { jsPDF } from 'jspdf';
+import html2canvas from 'html2canvas';
 import { 
   Search, 
   Filter, 
@@ -32,7 +34,10 @@ import {
   Clock,
   AlertTriangle,
   Printer,
-  Receipt
+  Receipt,
+  Download,
+  Loader2,
+  Check
 } from 'lucide-react';
 import { LandPlot, LandStatus, PortfolioSettings } from '../types/land';
 import { formatCurrency, formatThaiArea, calculatePlotHoldingInfo } from '../services/storage';
@@ -87,9 +92,13 @@ export const LandTable: React.FC<LandTableProps> = ({
   // View mode: 'table' (full spreadsheet) or 'cards' (responsive grid fitting every screen)
   const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
 
-  // Print Report modal state
+  // Print Report & PDF export state
+  const printReportRef = useRef<HTMLDivElement>(null);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
   const [printScope, setPrintScope] = useState<'all' | 'filtered'>('filtered');
+  const [printOrientation, setPrintOrientation] = useState<'landscape' | 'portrait'>('landscape');
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [pdfToast, setPdfToast] = useState<string | null>(null);
 
   // Multi-select for Land Comparison
   const [selectedPlotIds, setSelectedPlotIds] = useState<string[]>([]);
@@ -341,13 +350,13 @@ export const LandTable: React.FC<LandTableProps> = ({
   }, [plots, searchTerm, statusFilter, holdingAlertFilter, provinceFilter, districtFilter, landTypeFilter, pricePreset, minPrice, maxPrice, sortBy]);
 
   // Aggregate stats for filtered plots
-  const totalCostFiltered = useMemo(() => filteredPlots.reduce((sum, p) => sum + (p.totalCost || 0), 0), [filteredPlots]);
-  const totalPurchaseFiltered = useMemo(() => filteredPlots.reduce((sum, p) => sum + (p.purchasePrice || 0), 0), [filteredPlots]);
-  const totalTaxFiltered = useMemo(() => filteredPlots.reduce((sum, p) => sum + (p.taxAndFees || 0), 0), [filteredPlots]);
-  const totalSurveyFiltered = useMemo(() => filteredPlots.reduce((sum, p) => sum + (p.surveyCost || 0), 0), [filteredPlots]);
-  const totalOtherFiltered = useMemo(() => filteredPlots.reduce((sum, p) => sum + (p.otherExpenses || 0), 0), [filteredPlots]);
-  const totalTargetSaleFiltered = useMemo(() => filteredPlots.reduce((sum, p) => sum + (p.targetSalePrice || 0), 0), [filteredPlots]);
-  const totalSqWahFiltered = useMemo(() => filteredPlots.reduce((sum, p) => sum + (p.totalSqWah || 0), 0), [filteredPlots]);
+  const totalCostFiltered = useMemo(() => filteredPlots.reduce((sum, p) => sum + (Number(p.totalCost) || 0), 0), [filteredPlots]);
+  const totalPurchaseFiltered = useMemo(() => filteredPlots.reduce((sum, p) => sum + (Number(p.purchasePrice) || 0), 0), [filteredPlots]);
+  const totalTaxFiltered = useMemo(() => filteredPlots.reduce((sum, p) => sum + (Number(p.taxAndFees) || 0), 0), [filteredPlots]);
+  const totalSurveyFiltered = useMemo(() => filteredPlots.reduce((sum, p) => sum + (Number(p.surveyCost) || 0), 0), [filteredPlots]);
+  const totalOtherFiltered = useMemo(() => filteredPlots.reduce((sum, p) => sum + (Number(p.otherExpenses) || 0), 0), [filteredPlots]);
+  const totalTargetSaleFiltered = useMemo(() => filteredPlots.reduce((sum, p) => sum + (Number(p.targetSalePrice) || 0), 0), [filteredPlots]);
+  const totalSqWahFiltered = useMemo(() => filteredPlots.reduce((sum, p) => sum + (Number(p.totalSqWah) || 0), 0), [filteredPlots]);
   const totalLandTaxFiltered = useMemo(() => filteredPlots.reduce((sum, p) => sum + getPlotLandTax(p).annualTax, 0), [filteredPlots]);
 
   // Selected plots for printing based on user choice
@@ -387,10 +396,184 @@ export const LandTable: React.FC<LandTableProps> = ({
     };
   }, [printPlots]);
 
+  // Dynamic print orientation stylesheet injector
+  const applyPrintOrientationStyle = (orientation: 'landscape' | 'portrait') => {
+    let styleEl = document.getElementById('dynamic-print-orientation-style') as HTMLStyleElement | null;
+    if (!styleEl) {
+      styleEl = document.createElement('style');
+      styleEl.id = 'dynamic-print-orientation-style';
+      document.head.appendChild(styleEl);
+    }
+    const margin = orientation === 'landscape' ? '8mm 8mm 10mm 8mm' : '8mm 6mm 10mm 6mm';
+    styleEl.innerHTML = `@media print { @page { size: A4 ${orientation} !important; margin: ${margin} !important; } }`;
+  };
+
+  useEffect(() => {
+    applyPrintOrientationStyle(printOrientation);
+  }, [printOrientation]);
+
+  // Native Browser Print dialog with dynamic orientation
+  const handlePrint = () => {
+    setIsPrintModalOpen(false);
+    applyPrintOrientationStyle(printOrientation);
+    document.documentElement.setAttribute('data-print-orientation', printOrientation);
+    setTimeout(() => {
+      window.print();
+    }, 250);
+  };
+
+  // High-Resolution Executive PDF Export & New Tab Viewer via jsPDF + html2canvas
+  const handleExportPdf = async (action: 'download' | 'open') => {
+    if (isGeneratingPdf) return;
+    setIsGeneratingPdf(true);
+
+    try {
+      const element = printReportRef.current;
+      if (!element) {
+        throw new Error('ไม่พบข้อมูลเอกสารรายงานตารางที่ดิน');
+      }
+
+      if (document.fonts) {
+        await document.fonts.ready;
+      }
+
+      const isLandscape = printOrientation === 'landscape';
+      
+      // Temporarily remove hidden and position off-screen with fixed width for immaculate html2canvas rendering
+      const hadHidden = element.classList.contains('hidden');
+      if (hadHidden) {
+        element.classList.remove('hidden');
+      }
+
+      const prevDisplay = element.style.display;
+      const prevPosition = element.style.position;
+      const prevLeft = element.style.left;
+      const prevTop = element.style.top;
+      const prevWidth = element.style.width;
+      const prevZ = element.style.zIndex;
+
+      element.style.display = 'block';
+      element.style.position = 'fixed';
+      element.style.left = '-9999px';
+      element.style.top = '0';
+      element.style.width = isLandscape ? '1280px' : '980px';
+      element.style.zIndex = '-1000';
+
+      // Settle DOM
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      const canvas = await html2canvas(element, {
+        scale: 2.0,
+        useCORS: true,
+        allowTaint: false,
+        logging: false,
+        backgroundColor: '#ffffff',
+        windowWidth: isLandscape ? 1280 : 980,
+        ignoreElements: (el) =>
+          el.classList?.contains('no-print') ||
+          el.classList?.contains('print:hidden') ||
+          el.classList?.contains('management-control') ||
+          el.tagName === 'BUTTON',
+      });
+
+      // Restore element styles
+      element.style.display = prevDisplay;
+      element.style.position = prevPosition;
+      element.style.left = prevLeft;
+      element.style.top = prevTop;
+      element.style.width = prevWidth;
+      element.style.zIndex = prevZ;
+      if (hadHidden) {
+        element.classList.add('hidden');
+      }
+
+      const pdf = new jsPDF({
+        orientation: isLandscape ? 'l' : 'p',
+        unit: 'mm',
+        format: 'a4',
+        compress: true,
+      });
+
+      const pageWidth = isLandscape ? 297 : 210;
+      const pageHeight = isLandscape ? 210 : 297;
+      const margin = 8;
+      const contentWidth = pageWidth - (margin * 2);
+      const contentHeight = pageHeight - (margin * 2);
+
+      const pageHeightPx = Math.floor((canvas.width * contentHeight) / contentWidth);
+      const totalPagesCount = Math.max(1, Math.ceil(canvas.height / pageHeightPx));
+
+      for (let p = 0; p < totalPagesCount; p++) {
+        if (p > 0) pdf.addPage();
+        const srcY = p * pageHeightPx;
+        const srcH = Math.min(pageHeightPx, canvas.height - srcY);
+
+        const pageCanvas = document.createElement('canvas');
+        pageCanvas.width = canvas.width;
+        pageCanvas.height = srcH;
+        const ctx = pageCanvas.getContext('2d');
+        if (ctx) {
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
+          ctx.drawImage(canvas, 0, srcY, canvas.width, srcH, 0, 0, canvas.width, srcH);
+        }
+
+        const sliceData = pageCanvas.toDataURL('image/jpeg', 0.95);
+        const sliceHeightMm = (srcH * contentWidth) / canvas.width;
+        pdf.addImage(sliceData, 'JPEG', margin, margin, contentWidth, sliceHeightMm);
+      }
+
+      // Add page numbering on each page
+      const totalPages = pdf.getNumberOfPages();
+      for (let i = 1; i <= totalPages; i++) {
+        pdf.setPage(i);
+        pdf.setFontSize(8);
+        pdf.setTextColor(51, 65, 85);
+        pdf.text(
+          `Page ${i} of ${totalPages} • Land Portfolio Ledger (${isLandscape ? 'A4 Landscape' : 'A4 Portrait'}) • ${new Date().toISOString().slice(0, 10)}`,
+          pageWidth / 2,
+          pageHeight - 4,
+          { align: 'center' }
+        );
+      }
+
+      const dateStr = new Date().toISOString().slice(0, 10);
+      const fileName = `Land_Portfolio_Ledger_${printScope}_${dateStr}.pdf`;
+
+      if (action === 'download') {
+        pdf.save(fileName);
+        setPdfToast('ดาวน์โหลดเอกสารรายงานบัญชีแปลงที่ดิน (PDF) เรียบร้อยแล้ว!');
+      } else {
+        const blob = pdf.output('blob');
+        const blobUrl = URL.createObjectURL(blob);
+        const opened = window.open(blobUrl, '_blank');
+        if (!opened) {
+          pdf.save(fileName);
+          setPdfToast('เปิดในแท็บใหม่ถูกบล็อก จึงบันทึกไฟล์ PDF ให้เรียบร้อย');
+        } else {
+          setPdfToast('เปิดดูเอกสารรายงานบัญชี (PDF) ในแท็บใหม่เรียบร้อยแล้ว!');
+        }
+      }
+
+      setIsPrintModalOpen(false);
+      setTimeout(() => setPdfToast(null), 4000);
+    } catch (err: any) {
+      console.warn('PDF generation encountered an issue, launching print fallback:', err);
+      setIsPrintModalOpen(false);
+      setTimeout(() => {
+        window.print();
+      }, 200);
+    } finally {
+      setIsGeneratingPdf(false);
+    }
+  };
+
   return (
     <div className="space-y-4 max-w-full">
-      {/* Google Sheets Auto-Sync Notification Bar */}
-      <div className="p-3 sm:p-4 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-900 to-emerald-950/40 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-lg">
+      {/* Interactive Controls & Tables - 100% Hidden in Print/PDF */}
+      <div className="space-y-4 max-w-full print:hidden no-print management-control">
+        {/* Google Sheets Auto-Sync Notification Bar */}
+        <div className="p-3 sm:p-4 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-900 to-emerald-950/40 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-lg">
         <div className="flex items-center gap-3 min-w-0">
           <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
             <FileSpreadsheet className="w-5 h-5" />
@@ -539,11 +722,11 @@ export const LandTable: React.FC<LandTableProps> = ({
             <button
               type="button"
               onClick={() => setIsPrintModalOpen(true)}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-medium border border-slate-700 transition-colors cursor-pointer"
-              title="พิมพ์รายงานสรุปพอร์ตแปลงที่ดิน (Print Report / A4)"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 hover:border-slate-600 transition-all cursor-pointer shadow-xs"
+              title="พิมพ์รายงานหรือส่งออกเป็น PDF คุณภาพสูง (A4 แนวนอน / แนวตั้ง)"
             >
               <Printer className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="hidden md:inline">พิมพ์รายงาน</span>
+              <span>พิมพ์ / PDF</span>
             </button>
 
             <button
@@ -1609,6 +1792,12 @@ export const LandTable: React.FC<LandTableProps> = ({
                 onClick={() => {
                   const id = plotToDelete.id;
                   setPlotToDelete(null);
+                  setSelectedPlotIds((prev) => prev.filter((pId) => pId !== id));
+                  setExpandedPlots((prev) => {
+                    const next = { ...prev };
+                    delete next[id];
+                    return next;
+                  });
                   onDeletePlot(id);
                 }}
                 className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold shadow-lg shadow-rose-600/30 flex items-center gap-1.5 transition-all cursor-pointer"
@@ -1666,43 +1855,118 @@ export const LandTable: React.FC<LandTableProps> = ({
 
       {/* Print Report Preview & Configuration Modal */}
       {isPrintModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
-          <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden p-6 space-y-5 animate-scale-up">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-xl bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl overflow-hidden p-5 sm:p-6 space-y-5 animate-scale-up">
+            {/* Header */}
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-2">
-                <Printer className="w-5 h-5 text-emerald-400" />
-                <h3 className="text-base font-bold text-white">พิมพ์รายงานสรุปพอร์ตแปลงที่ดิน</h3>
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                  <Printer className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white tracking-tight">
+                    พิมพ์รายงาน & ส่งออก PDF บัญชีแปลงที่ดิน
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    จัดหน้ากระดาษ A4 สวยงาม ข้อมูลสมดุล ตัวเลขครบถ้วน ไม่ตกขอบ
+                  </p>
+                </div>
               </div>
               <button
                 type="button"
                 onClick={() => setIsPrintModalOpen(false)}
-                className="p-1.5 text-slate-400 hover:text-slate-200 rounded-lg hover:bg-slate-800 cursor-pointer"
+                className="p-1.5 text-slate-400 hover:text-slate-200 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <div className="space-y-4 text-xs sm:text-sm text-slate-300">
-              <p className="text-xs text-slate-400">
-                ระบบได้จัดเตรียมรายงานในรูปแบบเอกสารทางการ (A4) พร้อมตารางสรุปการเงิน ยอดรวม และช่องลงนามเรียบร้อยแล้ว
-              </p>
+              {/* Orientation Selector */}
+              <div className="space-y-2">
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                  ทิศทางการจัดหน้ากระดาษ (Page Orientation):
+                </label>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPrintOrientation('landscape');
+                      applyPrintOrientationStyle('landscape');
+                    }}
+                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer relative ${
+                      printOrientation === 'landscape'
+                        ? 'bg-emerald-500/15 border-emerald-500 text-white ring-1 ring-emerald-500/40 shadow-md shadow-emerald-950/30'
+                        : 'bg-slate-800/80 border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="font-bold text-white text-xs sm:text-sm flex items-center gap-1.5">
+                        <span>แนวนอน (A4 Landscape)</span>
+                      </div>
+                      {printOrientation === 'landscape' && (
+                        <Check className="w-4 h-4 text-emerald-400" />
+                      )}
+                    </div>
+                    <div className="mt-1">
+                      <span className="inline-block px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-semibold">
+                        🌟 แนะนำมากที่สุด
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-1 leading-normal">
+                      ตารางบัญชี 11 คอลัมน์กว้างสบาย พอดีหน้ากระดาษ ไม่เบียด
+                    </p>
+                  </button>
 
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPrintOrientation('portrait');
+                      applyPrintOrientationStyle('portrait');
+                    }}
+                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer relative ${
+                      printOrientation === 'portrait'
+                        ? 'bg-emerald-500/15 border-emerald-500 text-white ring-1 ring-emerald-500/40 shadow-md shadow-emerald-950/30'
+                        : 'bg-slate-800/80 border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="font-bold text-white text-xs sm:text-sm">
+                        แนวตั้ง (A4 Portrait)
+                      </div>
+                      {printOrientation === 'portrait' && (
+                        <Check className="w-4 h-4 text-emerald-400" />
+                      )}
+                    </div>
+                    <div className="mt-1">
+                      <span className="inline-block px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 text-[10px] font-semibold">
+                        มาตรฐาน
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-1 leading-normal">
+                      สำหรับพิมพ์เอกสารทางการแนวตั้งเข้าแฟ้ม
+                    </p>
+                  </button>
+                </div>
+              </div>
+
+              {/* Scope Selector */}
               <div className="space-y-2">
                 <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
                   เลือกขอบเขตข้อมูลที่ต้องการพิมพ์:
                 </label>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-2 gap-2.5">
                   <button
                     type="button"
                     onClick={() => setPrintScope('filtered')}
                     className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
                       printScope === 'filtered'
-                        ? 'bg-emerald-500/15 border-emerald-500 text-white font-semibold'
-                        : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-800/80'
+                        ? 'bg-emerald-500/15 border-emerald-500 text-white font-semibold ring-1 ring-emerald-500/30'
+                        : 'bg-slate-800/80 border-slate-700 text-slate-400 hover:bg-slate-800'
                     }`}
                   >
                     <div className="font-semibold text-white">แปลงที่กรองอยู่</div>
-                    <div className="text-[11px] text-emerald-400 font-mono mt-0.5">
+                    <div className="text-[11px] text-emerald-400 font-mono mt-0.5 font-bold">
                       {filteredPlots.length} แปลง (ตามตัวกรองปัจจุบัน)
                     </div>
                   </button>
@@ -1712,12 +1976,12 @@ export const LandTable: React.FC<LandTableProps> = ({
                     onClick={() => setPrintScope('all')}
                     className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
                       printScope === 'all'
-                        ? 'bg-emerald-500/15 border-emerald-500 text-white font-semibold'
-                        : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-800/80'
+                        ? 'bg-emerald-500/15 border-emerald-500 text-white font-semibold ring-1 ring-emerald-500/30'
+                        : 'bg-slate-800/80 border-slate-700 text-slate-400 hover:bg-slate-800'
                     }`}
                   >
                     <div className="font-semibold text-white">แปลงทั้งหมดในพอร์ต</div>
-                    <div className="text-[11px] text-emerald-400 font-mono mt-0.5">
+                    <div className="text-[11px] text-emerald-400 font-mono mt-0.5 font-bold">
                       {plots.length} แปลง (ทั้งพอร์ต)
                     </div>
                   </button>
@@ -1726,105 +1990,156 @@ export const LandTable: React.FC<LandTableProps> = ({
 
               {/* Preview Stats summary */}
               <div className="p-3.5 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-2 text-xs">
-                <div className="flex justify-between text-slate-300">
-                  <span>จำนวนแปลงที่จะพิมพ์:</span>
-                  <span className="font-bold text-white font-mono">{printTotals.totalPlots} แปลง</span>
-                </div>
-                <div className="flex justify-between text-slate-300">
-                  <span>เนื้อที่รวม:</span>
-                  <span className="font-bold text-white font-mono">{formatThaiArea(printTotals.totalSqWah)}</span>
-                </div>
-                <div className="flex justify-between text-slate-300">
-                  <span>รวมต้นทุนทั้งสิ้น:</span>
-                  <span className="font-bold text-emerald-400 font-mono">{formatCurrency(printTotals.totalCost)}</span>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+                  <div className="p-2 rounded-lg bg-slate-900/60 border border-slate-700/50">
+                    <span className="text-[10px] text-slate-400 block">แปลงที่จะรายงาน</span>
+                    <span className="font-bold text-white font-mono text-xs">{printTotals.totalPlots} แปลง</span>
+                  </div>
+                  <div className="p-2 rounded-lg bg-slate-900/60 border border-slate-700/50">
+                    <span className="text-[10px] text-slate-400 block">เนื้อที่รวม</span>
+                    <span className="font-bold text-white font-mono text-[11px]">{formatThaiArea(printTotals.totalSqWah)}</span>
+                  </div>
+                  <div className="p-2 rounded-lg bg-slate-900/60 border border-slate-700/50">
+                    <span className="text-[10px] text-slate-400 block">ต้นทุนรวมทั้งสิ้น</span>
+                    <span className="font-bold text-emerald-400 font-mono text-[11px]">{formatCurrency(printTotals.totalCost)}</span>
+                  </div>
+                  <div className="p-2 rounded-lg bg-slate-900/60 border border-slate-700/50">
+                    <span className="text-[10px] text-slate-400 block">ภาษีที่ดิน/ปี</span>
+                    <span className="font-bold text-rose-400 font-mono text-[11px]">{formatCurrency(printTotals.totalAnnualLandTax)}</span>
+                  </div>
                 </div>
               </div>
             </div>
 
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+            {/* Action Buttons: Open PDF in New Tab, Download PDF, and Print Dialog */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 pt-3 border-t border-slate-800">
               <button
                 type="button"
                 onClick={() => setIsPrintModalOpen(false)}
-                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold cursor-pointer"
+                disabled={isGeneratingPdf}
+                className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold cursor-pointer transition-colors disabled:opacity-50"
               >
-                ยกเลิก
+                ปิดหน้าต่าง
               </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setIsPrintModalOpen(false);
-                  setTimeout(() => {
-                    window.print();
-                  }, 250);
-                }}
-                className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-lg shadow-emerald-600/30 flex items-center gap-1.5 transition-all cursor-pointer"
-              >
-                <Printer className="w-4 h-4" />
-                <span>สั่งพิมพ์รายงาน (A4 / PDF)</span>
-              </button>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  disabled={isGeneratingPdf}
+                  onClick={() => handleExportPdf('open')}
+                  className="flex-1 sm:flex-initial px-3.5 py-2 rounded-xl bg-sky-600/20 hover:bg-sky-600/30 text-sky-300 border border-sky-500/30 text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+                  title="เปิดเอกสารรายงาน PDF คุณภาพสูงในแท็บใหม่"
+                >
+                  {isGeneratingPdf ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-sky-400" />
+                  ) : (
+                    <Eye className="w-4 h-4 text-sky-400" />
+                  )}
+                  <span>เปิดดูเป็น PDF</span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={isGeneratingPdf}
+                  onClick={() => handleExportPdf('download')}
+                  className="flex-1 sm:flex-initial px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+                  title="ดาวน์โหลดไฟล์ PDF เข้าเครื่องโดยตรง"
+                >
+                  {isGeneratingPdf ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                  ) : (
+                    <Download className="w-4 h-4 text-white" />
+                  )}
+                  <span>ดาวน์โหลด PDF</span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={isGeneratingPdf}
+                  onClick={handlePrint}
+                  className="flex-1 sm:flex-initial px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+                  title="เปิดหน้าต่างสั่งพิมพ์ของบราวเซอร์เพื่อส่งออกเครื่องพิมพ์หรือ Save as PDF"
+                >
+                  <Printer className="w-4 h-4 text-slate-300" />
+                  <span>สั่งพิมพ์ (Print)</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Hidden container for print media (@media print in index.css expands this to full-page black & white) */}
-      <div id="printable-land-table-report" className="hidden print:block p-8 bg-white text-black font-sans">
+      </div> {/* Close Interactive Controls & Tables (print:hidden) */}
+
+      {/* Hidden container for print media & PDF export (Expanded to immaculate A4 layout in print and off-screen canvas) */}
+      <div 
+        ref={printReportRef}
+        id="printable-land-table-report" 
+        className="hidden print:block p-6 sm:p-8 bg-white text-black font-sans w-full max-w-full box-border"
+      >
         {/* Document Header */}
-        <div className="border-b-2 border-slate-900 pb-4 mb-6 flex justify-between items-start">
-          <div>
-            <h1 className="text-xl font-bold text-black tracking-tight mb-1">
-              {settings?.portfolioTitle || 'รายงานบัญชีแปลงที่ดินและการเงิน'}
-            </h1>
-            <p className="text-xs text-slate-700">
-              เจ้าของพอร์ต: <span className="font-semibold text-black">{settings?.ownerName || 'ผู้ดูแลระบบ'}</span> • สกุลเงิน: {settings?.currency || 'THB (บาท)'}
+        <div className="border-b-2 border-slate-900 pb-3 mb-4 flex justify-between items-start">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="px-2 py-0.5 rounded bg-slate-900 text-white text-[10px] font-bold tracking-wider uppercase">
+                EXECUTIVE LEDGER
+              </span>
+              <h1 className="text-xl font-extrabold text-black tracking-tight">
+                {settings?.portfolioTitle || 'รายงานบัญชีแปลงที่ดินและการเงิน'}
+              </h1>
+            </div>
+            <p className="text-[11px] text-slate-700">
+              เจ้าของพอร์ต: <span className="font-bold text-black">{settings?.ownerName || 'ผู้ดูแลระบบ'}</span> • สกุลเงิน: <span className="font-semibold text-black">{settings?.currency || 'THB (บาท)'}</span> • เอกสารทางการเพื่อการบริหารจัดการและการตรวจสอบ
             </p>
           </div>
-          <div className="text-right text-xs text-slate-700 space-y-0.5">
-            <p className="font-semibold text-black">เอกสารรายงานบัญชีพอร์ตที่ดินทางการ</p>
-            <p>วันที่พิมพ์: {new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })} น.</p>
-            <p>ขอบเขต: {printScope === 'all' ? `ทั้งหมด (${plots.length} แปลง)` : `กรองตามเงื่อนไข (${filteredPlots.length} แปลง)`}</p>
+          <div className="text-right text-[10.5px] text-slate-700 space-y-1">
+            <p className="font-bold text-slate-950 uppercase tracking-wide">
+              {printOrientation === 'landscape' ? 'รูปแบบ: แนวนอน (A4 Landscape)' : 'รูปแบบ: แนวตั้ง (A4 Portrait)'}
+            </p>
+            <p>วันที่พิมพ์: <span className="font-semibold text-black">{new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })} น.</span></p>
+            <p>ขอบเขตข้อมูล: <span className="font-semibold text-black">{printScope === 'all' ? `ทั้งหมด (${plots.length} แปลง)` : `กรองตามเงื่อนไข (${filteredPlots.length} แปลง)`}</span></p>
           </div>
         </div>
 
-        {/* KPI Summary Cards */}
-        <div className="grid grid-cols-5 gap-3 mb-6">
-          <div className="p-3 border border-slate-400 rounded bg-slate-50">
-            <span className="text-[10px] text-slate-600 block uppercase">จำนวนแปลงที่รายงาน</span>
-            <span className="text-lg font-bold text-black">{printTotals.totalPlots} แปลง</span>
+        {/* 5 Executive KPI Summary Cards */}
+        <div className="grid grid-cols-5 gap-2.5 mb-4">
+          <div className="p-2.5 border border-slate-300 rounded-lg bg-slate-50/80 shadow-xs">
+            <span className="text-[9.5px] font-semibold text-slate-600 block uppercase">จำนวนแปลงที่ดิน</span>
+            <span className="text-base font-extrabold text-black font-mono">{printTotals.totalPlots} <span className="text-xs font-normal text-slate-700">แปลง</span></span>
           </div>
-          <div className="p-3 border border-slate-400 rounded bg-slate-50">
-            <span className="text-[10px] text-slate-600 block uppercase">เนื้อที่รวม</span>
-            <span className="text-lg font-bold text-black">{formatThaiArea(printTotals.totalSqWah)}</span>
+          <div className="p-2.5 border border-slate-300 rounded-lg bg-slate-50/80 shadow-xs">
+            <span className="text-[9.5px] font-semibold text-slate-600 block uppercase">เนื้อที่ดินรวมทั้งหมด</span>
+            <span className="text-sm font-bold text-black font-mono leading-tight block">{formatThaiArea(printTotals.totalSqWah)}</span>
           </div>
-          <div className="p-3 border border-slate-400 rounded bg-slate-50">
-            <span className="text-[10px] text-slate-600 block uppercase">ต้นทุนรวมทั้งสิ้น</span>
-            <span className="text-lg font-bold text-black">{formatCurrency(printTotals.totalCost)}</span>
+          <div className="p-2.5 border border-slate-300 rounded-lg bg-slate-50/80 shadow-xs">
+            <span className="text-[9.5px] font-semibold text-slate-600 block uppercase">ต้นทุนรวมสุทธิทั้งสิ้น</span>
+            <span className="text-base font-extrabold text-black font-mono">{formatCurrency(printTotals.totalCost)}</span>
           </div>
-          <div className="p-3 border border-slate-400 rounded bg-slate-50">
-            <span className="text-[10px] text-slate-600 block uppercase">ภาษีที่ดิน/ปี รวม</span>
-            <span className="text-lg font-bold text-rose-700">{formatCurrency(printTotals.totalAnnualLandTax)}</span>
+          <div className="p-2.5 border border-slate-300 rounded-lg bg-slate-50/80 shadow-xs">
+            <span className="text-[9.5px] font-semibold text-slate-600 block uppercase">ภาษีที่ดิน/ปี รวม</span>
+            <span className="text-base font-extrabold text-rose-800 font-mono">{formatCurrency(printTotals.totalAnnualLandTax)}</span>
           </div>
-          <div className="p-3 border border-slate-400 rounded bg-slate-50">
-            <span className="text-[10px] text-slate-600 block uppercase">มูลค่าเป้าหมาย/ยอดขาย</span>
-            <span className="text-lg font-bold text-black">{formatCurrency(printTotals.totalTargetOrSold)}</span>
+          <div className="p-2.5 border border-slate-300 rounded-lg bg-slate-50/80 shadow-xs">
+            <span className="text-[9.5px] font-semibold text-slate-600 block uppercase">มูลค่าเป้าหมาย/ยอดขาย</span>
+            <span className="text-base font-extrabold text-black font-mono">{formatCurrency(printTotals.totalTargetOrSold)}</span>
           </div>
         </div>
 
-        {/* Financial Table */}
-        <table className="w-full border-collapse border border-slate-400 text-xs">
+        {/* Financial Table - Fixed 100% table layout for perfect balance without clipping */}
+        <table className="w-full border-collapse border border-slate-300 text-[9.5px] leading-tight table-fixed">
           <thead>
-            <tr className="bg-slate-100 text-black border-b border-slate-400">
-              <th className="p-2 border border-slate-300 text-center w-10">ลำดับ</th>
-              <th className="p-2 border border-slate-300 text-left">รายละเอียดแปลงที่ดิน</th>
-              <th className="p-2 border border-slate-300 text-left">ทำเล (ตำบล/อำเภอ/จังหวัด)</th>
-              <th className="p-2 border border-slate-300 text-center">ประเภท</th>
-              <th className="p-2 border border-slate-300 text-right">เนื้อที่</th>
-              <th className="p-2 border border-slate-300 text-right">ราคาซื้อ (บาท)</th>
-              <th className="p-2 border border-slate-300 text-right">ค่าใช้จ่ายอื่น</th>
-              <th className="p-2 border border-slate-300 text-right">ต้นทุนรวม (บาท)</th>
-              <th className="p-2 border border-slate-300 text-right">ภาษีที่ดิน/ปี</th>
-              <th className="p-2 border border-slate-300 text-right">ราคาเป้า/ขายจริง</th>
-              <th className="p-2 border border-slate-300 text-center">สถานะ</th>
+            <tr className="bg-slate-100 text-black border-b-2 border-slate-400">
+              <th style={{ width: '3.5%' }} className="py-2 px-1 border border-slate-300 text-center font-bold">#</th>
+              <th style={{ width: '19%' }} className="py-2 px-2 border border-slate-300 text-left font-bold">แปลงที่ดิน / เลขโฉนด</th>
+              <th style={{ width: '13.5%' }} className="py-2 px-1.5 border border-slate-300 text-left font-bold">ทำเล (ตำบล/อำเภอ/จังหวัด)</th>
+              <th style={{ width: '7%' }} className="py-2 px-1.5 border border-slate-300 text-center font-bold">ประเภท</th>
+              <th style={{ width: '9.5%' }} className="py-2 px-1.5 border border-slate-300 text-right font-mono font-bold">เนื้อที่</th>
+              <th style={{ width: '9.5%' }} className="py-2 px-1.5 border border-slate-300 text-right font-mono font-bold whitespace-nowrap">ราคาซื้อ (บาท)</th>
+              <th style={{ width: '7.5%' }} className="py-2 px-1.5 border border-slate-300 text-right font-mono font-bold whitespace-nowrap">ค่าใช้จ่ายอื่น</th>
+              <th style={{ width: '10.5%' }} className="py-2 px-1.5 border border-slate-300 text-right font-mono font-bold whitespace-nowrap">ต้นทุนรวมสุทธิ</th>
+              <th style={{ width: '6.5%' }} className="py-2 px-1.5 border border-slate-300 text-right font-mono font-bold whitespace-nowrap">ภาษี/ปี</th>
+              <th style={{ width: '9%' }} className="py-2 px-1.5 border border-slate-300 text-right font-mono font-bold whitespace-nowrap">เป้า/ขายจริง</th>
+              <th style={{ width: '4.5%' }} className="py-2 px-1 border border-slate-300 text-center font-bold">สถานะ</th>
             </tr>
           </thead>
           <tbody>
@@ -1833,97 +2148,105 @@ export const LandTable: React.FC<LandTableProps> = ({
               const targetOrSold = plot.status === 'sold' ? (Number(plot.soldPrice) || 0) : (Number(plot.targetSalePrice) || 0);
               const tax = getPlotLandTax(plot);
               return (
-                <tr key={plot.id} className="border-b border-slate-300 hover:bg-slate-50">
-                  <td className="p-2 border border-slate-300 text-center font-mono font-semibold">
+                <tr key={plot.id} className="border-b border-slate-200 even:bg-slate-50/70 hover:bg-slate-100/50">
+                  <td className="py-1.5 px-1 border border-slate-300 text-center font-mono font-bold text-slate-800">
                     {plot.orderNumber || idx + 1}
                   </td>
-                  <td className="p-2 border border-slate-300">
-                    <div className="font-semibold text-black">{plot.title}</div>
+                  <td className="py-1.5 px-2 border border-slate-300 overflow-hidden text-ellipsis">
+                    <div className="font-bold text-black truncate">{plot.title}</div>
                     {plot.primaryDeedNumber && (
-                      <div className="text-[10px] text-slate-600 font-mono">โฉนด: {plot.primaryDeedNumber}</div>
+                      <div className="text-[9px] text-slate-600 font-mono">โฉนด: {plot.primaryDeedNumber}</div>
                     )}
                   </td>
-                  <td className="p-2 border border-slate-300 text-slate-800">
+                  <td className="py-1.5 px-1.5 border border-slate-300 text-slate-800 text-[9px] overflow-hidden text-ellipsis">
                     {plot.subdistrict || '-'}, {plot.district || '-'}, {plot.province || '-'}
                   </td>
-                  <td className="p-2 border border-slate-300 text-center text-[11px]">
+                  <td className="py-1.5 px-1.5 border border-slate-300 text-center text-[9px]">
                     {plot.landType || '-'}
                   </td>
-                  <td className="p-2 border border-slate-300 text-right font-mono">
+                  <td className="py-1.5 px-1.5 border border-slate-300 text-right font-mono whitespace-nowrap">
                     {formatThaiArea(plot.rai, plot.ngan, plot.sqWah)}
                   </td>
-                  <td className="p-2 border border-slate-300 text-right font-mono">
+                  <td className="py-1.5 px-1.5 border border-slate-300 text-right font-mono whitespace-nowrap">
                     {formatCurrency(plot.purchasePrice)}
                   </td>
-                  <td className="p-2 border border-slate-300 text-right font-mono text-slate-700">
+                  <td className="py-1.5 px-1.5 border border-slate-300 text-right font-mono text-slate-700 whitespace-nowrap">
                     {formatCurrency(otherCost)}
                   </td>
-                  <td className="p-2 border border-slate-300 text-right font-mono font-semibold">
+                  <td className="py-1.5 px-1.5 border border-slate-300 text-right font-mono font-bold text-black whitespace-nowrap">
                     {formatCurrency(plot.totalCost)}
                   </td>
-                  <td className="p-2 border border-slate-300 text-right font-mono">
-                    <span className={tax.annualTax > 0 ? "font-semibold text-rose-800" : "text-emerald-800"}>
+                  <td className="py-1.5 px-1.5 border border-slate-300 text-right font-mono whitespace-nowrap">
+                    <span className={tax.annualTax > 0 ? "font-bold text-rose-800" : "text-emerald-800"}>
                       {formatCurrency(tax.annualTax)}
                     </span>
-                    <div className="text-[9px] text-slate-500">
-                      {TAX_USAGE_CONFIGS[tax.usageType]?.shortLabel || tax.usageType} ({tax.effectiveRatePercent.toFixed(2)}%)
-                    </div>
                   </td>
-                  <td className="p-2 border border-slate-300 text-right font-mono font-semibold">
+                  <td className="py-1.5 px-1.5 border border-slate-300 text-right font-mono font-bold text-black whitespace-nowrap">
                     {formatCurrency(targetOrSold)}
                   </td>
-                  <td className="p-2 border border-slate-300 text-center font-semibold text-[11px]">
-                    {plot.status === 'holding' && 'ถือครอง'}
-                    {plot.status === 'for_sale' && 'ประกาศขาย'}
-                    {plot.status === 'consignment' && 'ขายฝาก'}
-                    {plot.status === 'sold' && 'ขายแล้ว'}
+                  <td className="py-1.5 px-1 border border-slate-300 text-center font-bold text-[9px] whitespace-nowrap">
+                    {plot.status === 'holding' && <span className="text-emerald-900">ถือครอง</span>}
+                    {plot.status === 'for_sale' && <span className="text-blue-900">ประกาศขาย</span>}
+                    {plot.status === 'consignment' && <span className="text-amber-900">ขายฝาก</span>}
+                    {plot.status === 'sold' && <span className="text-rose-900">ขายแล้ว</span>}
                   </td>
                 </tr>
               );
             })}
           </tbody>
           <tfoot>
-            <tr className="bg-slate-100 font-bold border-t-2 border-slate-900">
-              <td colSpan={4} className="p-2 border border-slate-300 text-center">
+            <tr className="bg-slate-100 font-extrabold border-t-2 border-b-2 border-slate-900">
+              <td colSpan={4} className="py-2.5 px-2 border border-slate-300 text-center font-bold text-black">
                 รวมทั้งสิ้น ({printTotals.totalPlots} แปลง)
               </td>
-              <td className="p-2 border border-slate-300 text-right font-mono">
+              <td className="py-2.5 px-1.5 border border-slate-300 text-right font-mono whitespace-nowrap text-black font-bold">
                 {formatThaiArea(printTotals.totalSqWah)}
               </td>
-              <td className="p-2 border border-slate-300 text-right font-mono">
+              <td className="py-2.5 px-1.5 border border-slate-300 text-right font-mono whitespace-nowrap text-black font-bold">
                 {formatCurrency(printTotals.totalPurchase)}
               </td>
-              <td className="p-2 border border-slate-300 text-right font-mono">
+              <td className="py-2.5 px-1.5 border border-slate-300 text-right font-mono whitespace-nowrap text-slate-800 font-bold">
                 {formatCurrency(printTotals.totalFees)}
               </td>
-              <td className="p-2 border border-slate-300 text-right font-mono text-black">
+              <td className="py-2.5 px-1.5 border border-slate-300 text-right font-mono text-black font-extrabold whitespace-nowrap">
                 {formatCurrency(printTotals.totalCost)}
               </td>
-              <td className="p-2 border border-slate-300 text-right font-mono font-bold text-rose-800">
+              <td className="py-2.5 px-1.5 border border-slate-300 text-right font-mono font-extrabold text-rose-900 whitespace-nowrap">
                 {formatCurrency(printTotals.totalAnnualLandTax)}
               </td>
-              <td className="p-2 border border-slate-300 text-right font-mono text-black">
+              <td className="py-2.5 px-1.5 border border-slate-300 text-right font-mono text-black font-extrabold whitespace-nowrap">
                 {formatCurrency(printTotals.totalTargetOrSold)}
               </td>
-              <td className="p-2 border border-slate-300 text-center">-</td>
+              <td className="py-2.5 px-1 border border-slate-300 text-center font-bold text-black">-</td>
             </tr>
           </tfoot>
         </table>
 
         {/* Signature & Verification Block */}
-        <div className="mt-12 grid grid-cols-2 gap-12 pt-6 border-t border-slate-300 text-xs">
-          <div className="text-center space-y-10">
-            <p className="font-semibold text-slate-800">ผู้จัดทำรายงาน (Prepared By)</p>
-            <div className="border-b border-slate-400 w-48 mx-auto"></div>
-            <p className="text-slate-600">วันที่: ..... / ..... / ..........</p>
+        <div className="mt-10 grid grid-cols-2 gap-12 pt-6 border-t border-slate-300 text-xs">
+          <div className="text-center space-y-9">
+            <p className="font-bold text-slate-900">ผู้จัดทำรายงาน (Prepared By)</p>
+            <div className="border-b border-slate-400 w-52 mx-auto"></div>
+            <p className="text-slate-600 text-[11px]">วันที่: ..... / ..... / ..........</p>
           </div>
-          <div className="text-center space-y-10">
-            <p className="font-semibold text-slate-800">ผู้ตรวจสอบ / เจ้าของพอร์ต (Approved By)</p>
-            <div className="border-b border-slate-400 w-48 mx-auto"></div>
-            <p className="text-slate-600">วันที่: ..... / ..... / ..........</p>
+          <div className="text-center space-y-9">
+            <p className="font-bold text-slate-900">ผู้ตรวจสอบ / เจ้าของพอร์ต (Approved By)</p>
+            <div className="border-b border-slate-400 w-52 mx-auto"></div>
+            <p className="text-slate-600 text-[11px]">วันที่: ..... / ..... / ..........</p>
           </div>
         </div>
       </div>
+
+      {/* Toast Notification for PDF Generation / Export */}
+      {pdfToast && (
+        <div 
+          id="pdf-toast-container" 
+          className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 px-4 py-3 rounded-xl bg-emerald-600 text-white text-xs sm:text-sm font-semibold shadow-2xl shadow-emerald-600/40 animate-fade-in no-print"
+        >
+          <CheckCircle2 className="w-5 h-5 flex-shrink-0 text-white" />
+          <span>{pdfToast}</span>
+        </div>
+      )}
     </div>
   );
 };

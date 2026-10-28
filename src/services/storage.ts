@@ -49,7 +49,10 @@ export const loadPlotsFromStorage = (): LandPlot[] => {
       return INITIAL_LAND_PLOTS;
     }
     const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed) && parsed.length > 0) {
+    if (Array.isArray(parsed)) {
+      if (parsed.length === 0) {
+        return [];
+      }
       return parsed.map((p: LandPlot) => {
         if (!p.latitude || !p.longitude) {
           const match = INITIAL_LAND_PLOTS.find((d) => d.id === p.id || d.orderNumber === p.orderNumber);
@@ -321,6 +324,13 @@ export const exportToCsvFile = (plots: LandPlot[], settings: PortfolioSettings) 
   dlAnchor.click();
 };
 
+/**
+ * Single source of truth helper for plot target sale price (KPI target)
+ */
+export const getPlotTargetSalePrice = (p: LandPlot): number => {
+  return Number(p.targetSalePrice) || 0;
+};
+
 export const calculateKPIs = (plots: LandPlot[]): KPIStats => {
   let holdingPlots = 0;
   let soldPlots = 0;
@@ -352,6 +362,7 @@ export const calculateKPIs = (plots: LandPlot[]): KPIStats => {
     totalAreaSqWah += sqw;
     totalPurchaseCost += purchase;
     totalAcquisitionCost += cost;
+    totalTargetSalePrice += targetSale;
 
     if (p.status === 'sold') {
       soldPlots++;
@@ -365,17 +376,16 @@ export const calculateKPIs = (plots: LandPlot[]): KPIStats => {
       } else {
         holdingPlots++;
       }
-      totalTargetSalePrice += targetSale > 0 ? targetSale : cost * 1.3; // Default 30% markup if not set
     }
   });
 
   // Calculate projected gross profit on active holdings
-  const holdingAcquisitionCost = plots
-    .filter((p) => p.status !== 'sold')
-    .reduce((sum, p) => sum + (Number(p.totalCost) || 0), 0);
+  const activePlots = plots.filter((p) => p.status !== 'sold');
+  const activePlotsCost = activePlots.reduce((sum, p) => sum + (Number(p.totalCost) || 0), 0);
+  const activePlotsTarget = activePlots.reduce((sum, p) => sum + (Number(p.targetSalePrice) || 0), 0);
 
-  const projectedGrossProfit = totalTargetSalePrice - holdingAcquisitionCost;
-  const projectedROI = holdingAcquisitionCost > 0 ? (projectedGrossProfit / holdingAcquisitionCost) * 100 : 0;
+  const projectedGrossProfit = activePlotsTarget > 0 ? activePlotsTarget - activePlotsCost : (totalTargetSalePrice > 0 ? totalTargetSalePrice - totalAcquisitionCost : 0);
+  const projectedROI = activePlotsCost > 0 ? (projectedGrossProfit / activePlotsCost) * 100 : 0;
 
   return {
     totalPlots: plots.length,

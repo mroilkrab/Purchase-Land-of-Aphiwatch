@@ -64,6 +64,7 @@ import { compressImageForStorage } from '../services/dbStorage';
 import { ensureLandPlotDriveFolder, uploadPlotImageToDrive } from '../services/googleDrive';
 import { getAccessToken } from '../services/firebaseAuth';
 import { getPlotLandTax, calculateLandTax, inferDefaultTaxUsage, TAX_USAGE_CONFIGS } from '../services/landTax';
+import { triggerPrint } from '../utils/print';
 
 export interface DocumentRequirement {
   id: DocumentChecklistCategory;
@@ -783,8 +784,8 @@ export const LandDetailModal: React.FC<LandDetailModalProps> = ({
       console.warn('PDF export direct capture encountered an issue, launching print-to-PDF fallback:', err);
       showToast('กำลังเปิดหน้าต่างพิมพ์รายงาน (ท่านสามารถเลือกบันทึกเป็น PDF ขนาด A4 ได้ทันที)');
       setTimeout(() => {
-        window.print();
-      }, 350);
+        triggerPrint('portrait');
+      }, 200);
     } finally {
       setIsExportingPdf(false);
     }
@@ -839,11 +840,11 @@ export const LandDetailModal: React.FC<LandDetailModalProps> = ({
 
             <button
               type="button"
-              onClick={() => window.print()}
-              className="hidden sm:flex px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium items-center gap-1.5 transition-colors cursor-pointer"
-              title="พิมพ์สรุปรายงานแปลงนี้ (A4)"
+              onClick={() => triggerPrint('portrait')}
+              className="flex px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-400/30 text-xs font-semibold items-center gap-1.5 shadow-md shadow-indigo-600/25 transition-all cursor-pointer"
+              title="พิมพ์สรุปรายงานแปลงนี้ (A4 PDF / Print)"
             >
-              <Printer className="w-3.5 h-3.5 text-slate-300" />
+              <Printer className="w-3.5 h-3.5 text-white" />
               <span>พิมพ์รายงาน</span>
             </button>
 

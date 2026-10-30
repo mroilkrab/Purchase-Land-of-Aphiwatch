@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { LandPlot, KPIStats, PortfolioSettings } from '../types/land';
 import { formatCurrency, formatThaiArea } from '../services/storage';
+import { triggerPrint } from '../utils/print';
 
 interface LiveArtifactViewProps {
   plots: LandPlot[];
@@ -49,7 +50,7 @@ ${plots.slice(0, 5).map((p) => `- แปลง #${p.orderNumber} ${p.title} (${p
   };
 
   const handlePrint = () => {
-    window.print();
+    triggerPrint('portrait');
   };
 
   return (

@@ -43,6 +43,7 @@ import { LandPlot, LandStatus, PortfolioSettings } from '../types/land';
 import { formatCurrency, formatThaiArea, calculatePlotHoldingInfo } from '../services/storage';
 import { LandComparisonModal } from './LandComparisonModal';
 import { getPlotLandTax, TAX_USAGE_CONFIGS } from '../services/landTax';
+import { triggerPrint } from '../utils/print';
 
 interface LandTableProps {
   plots: LandPlot[];
@@ -95,7 +96,7 @@ export const LandTable: React.FC<LandTableProps> = ({
   // Print Report & PDF export state
   const printReportRef = useRef<HTMLDivElement>(null);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
-  const [printScope, setPrintScope] = useState<'all' | 'filtered'>('filtered');
+  const [printScope, setPrintScope] = useState<'selected' | 'filtered' | 'all'>('filtered');
   const [printOrientation, setPrintOrientation] = useState<'landscape' | 'portrait'>('landscape');
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [pdfToast, setPdfToast] = useState<string | null>(null);
@@ -359,10 +360,22 @@ export const LandTable: React.FC<LandTableProps> = ({
   const totalSqWahFiltered = useMemo(() => filteredPlots.reduce((sum, p) => sum + (Number(p.totalSqWah) || 0), 0), [filteredPlots]);
   const totalLandTaxFiltered = useMemo(() => filteredPlots.reduce((sum, p) => sum + getPlotLandTax(p).annualTax, 0), [filteredPlots]);
 
-  // Selected plots for printing based on user choice
+  // Selected plots for printing based on user choice ('selected' | 'filtered' | 'all')
   const printPlots = useMemo(() => {
+    if (printScope === 'selected') {
+      const selected = plots.filter((p) => selectedPlotIds.includes(p.id));
+      return selected.length > 0 ? selected : filteredPlots;
+    }
     return printScope === 'all' ? plots : filteredPlots;
-  }, [printScope, plots, filteredPlots]);
+  }, [printScope, plots, filteredPlots, selectedPlotIds]);
+
+  // Quick single-plot print helper
+  const handlePrintSinglePlot = (plot: LandPlot, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setSelectedPlotIds([plot.id]);
+    setPrintScope('selected');
+    setIsPrintModalOpen(true);
+  };
 
   const printTotals = useMemo(() => {
     let totalSqWah = 0;
@@ -396,30 +409,10 @@ export const LandTable: React.FC<LandTableProps> = ({
     };
   }, [printPlots]);
 
-  // Dynamic print orientation stylesheet injector
-  const applyPrintOrientationStyle = (orientation: 'landscape' | 'portrait') => {
-    let styleEl = document.getElementById('dynamic-print-orientation-style') as HTMLStyleElement | null;
-    if (!styleEl) {
-      styleEl = document.createElement('style');
-      styleEl.id = 'dynamic-print-orientation-style';
-      document.head.appendChild(styleEl);
-    }
-    const margin = orientation === 'landscape' ? '8mm 8mm 10mm 8mm' : '8mm 6mm 10mm 6mm';
-    styleEl.innerHTML = `@media print { @page { size: A4 ${orientation} !important; margin: ${margin} !important; } }`;
-  };
-
-  useEffect(() => {
-    applyPrintOrientationStyle(printOrientation);
-  }, [printOrientation]);
-
-  // Native Browser Print dialog with dynamic orientation
+  // Native Browser Print dialog with dynamic orientation and automatic cleanup
   const handlePrint = () => {
     setIsPrintModalOpen(false);
-    applyPrintOrientationStyle(printOrientation);
-    document.documentElement.setAttribute('data-print-orientation', printOrientation);
-    setTimeout(() => {
-      window.print();
-    }, 250);
+    triggerPrint(printOrientation);
   };
 
   // High-Resolution Executive PDF Export & New Tab Viewer via jsPDF + html2canvas
@@ -561,7 +554,7 @@ export const LandTable: React.FC<LandTableProps> = ({
       console.warn('PDF generation encountered an issue, launching print fallback:', err);
       setIsPrintModalOpen(false);
       setTimeout(() => {
-        window.print();
+        triggerPrint(printOrientation);
       }, 200);
     } finally {
       setIsGeneratingPdf(false);
@@ -638,10 +631,10 @@ export const LandTable: React.FC<LandTableProps> = ({
       </div>
 
       {/* Primary Toolbar: Search Bar, View Mode Switcher, Quick Filters, Export, Add */}
-      <div className="p-3.5 sm:p-4 bg-slate-900 rounded-2xl border border-slate-800 space-y-3 shadow-xl">
+      <div id="land-table-toolbar" className="p-3.5 sm:p-4 bg-slate-900 rounded-2xl border border-slate-800 space-y-3 shadow-xl">
         <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
           {/* Enhanced Search Input */}
-          <div className="relative flex-1 min-w-0 max-w-xl">
+          <div id="land-table-search-bar" className="relative flex-1 min-w-0 max-w-xl">
             <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
@@ -740,7 +733,7 @@ export const LandTable: React.FC<LandTableProps> = ({
         </div>
 
         {/* Real-Time Interactive Tag Chips Bar (Quick Filters for Status, Alert, & Locations) */}
-        <div className="pt-2.5 border-t border-slate-800/80 space-y-2">
+        <div id="land-table-filters" className="pt-2.5 border-t border-slate-800/80 space-y-2">
           {/* Status & Alert Chips */}
           <div className="flex items-center gap-1.5 flex-wrap">
             <span className="text-[11px] font-semibold text-slate-400 flex items-center gap-1 mr-1">
@@ -1342,7 +1335,7 @@ export const LandTable: React.FC<LandTableProps> = ({
 
           {/* Main Table Container */}
           <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/80 shadow-lg relative max-w-full">
-            <table className="w-full text-left text-xs border-separate border-spacing-0 min-w-[1360px]">
+            <table id="main-land-table" className="w-full text-left text-xs border-separate border-spacing-0 min-w-[1360px]">
               <thead>
                 <tr className="bg-slate-800/90 border-b border-slate-700 text-slate-300 font-semibold sticky top-0 z-20">
                   <th className="py-3 px-2 w-8 text-center border-b border-slate-700">
@@ -1370,7 +1363,7 @@ export const LandTable: React.FC<LandTableProps> = ({
                   <th className="py-3 px-3 text-right text-emerald-400 border-b border-slate-700">ราคาตั้งใจขาย (KPI)</th>
                   <th className="py-3 px-3 text-center border-b border-slate-700">สถานะ</th>
                   {/* Sticky Action Column so actions are always reachable */}
-                  <th className="py-3 px-3 text-center w-36 min-w-[145px] sticky right-0 bg-slate-800 border-b border-l border-slate-700 shadow-[-4px_0_10px_rgba(0,0,0,0.4)] z-30">
+                  <th id="main-land-table-actions" className="py-3 px-3 text-center w-36 min-w-[145px] sticky right-0 bg-slate-800 border-b border-l border-slate-700 shadow-[-4px_0_10px_rgba(0,0,0,0.4)] z-30 action-buttons management-control">
                     จัดการ
                   </th>
                 </tr>
@@ -1568,7 +1561,7 @@ export const LandTable: React.FC<LandTableProps> = ({
                             </span>
                           </td>
                           {/* Sticky Action TD so user always has access to Edit / Delete / View */}
-                          <td className="py-2.5 px-3 text-center sticky right-0 bg-slate-900/98 backdrop-blur-md border-b border-l border-slate-700/80 shadow-[-4px_0_12px_rgba(0,0,0,0.5)] z-20" onClick={(e) => e.stopPropagation()}>
+                          <td className="py-2.5 px-3 text-center sticky right-0 bg-slate-900/98 backdrop-blur-md border-b border-l border-slate-700/80 shadow-[-4px_0_12px_rgba(0,0,0,0.5)] z-20 action-buttons management-control" onClick={(e) => e.stopPropagation()}>
                             <div className="flex items-center justify-center gap-1.5">
                               <button
                                 onClick={(e) => {
@@ -1579,6 +1572,13 @@ export const LandTable: React.FC<LandTableProps> = ({
                                 className="p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-colors cursor-pointer"
                               >
                                 <Eye className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={(e) => handlePrintSinglePlot(plot, e)}
+                                title="พิมพ์ / ดู PDF แปลงนี้"
+                                className="p-1.5 text-slate-400 hover:text-cyan-400 hover:bg-cyan-500/10 rounded-lg transition-colors cursor-pointer"
+                              >
+                                <Printer className="w-4 h-4" />
                               </button>
                               <button
                                 onClick={(e) => {
@@ -1822,6 +1822,18 @@ export const LandTable: React.FC<LandTableProps> = ({
 
           <div className="flex items-center gap-2">
             <button
+              onClick={() => {
+                setPrintScope('selected');
+                setIsPrintModalOpen(true);
+              }}
+              className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold flex items-center gap-1.5 transition-all shadow-md shadow-emerald-600/30 cursor-pointer"
+              title="พิมพ์หรือเปิดดู PDF สำหรับแปลงที่เลือกนี้"
+            >
+              <Printer className="w-4 h-4" />
+              <span>พิมพ์ / PDF แปลงที่เลือก ({selectedPlotIds.length})</span>
+            </button>
+
+            <button
               onClick={() => setIsComparisonOpen(true)}
               disabled={selectedPlotIds.length < 2}
               className={`px-4 py-2 rounded-xl font-bold flex items-center gap-1.5 transition-all shadow-md ${
@@ -1890,10 +1902,7 @@ export const LandTable: React.FC<LandTableProps> = ({
                 <div className="grid grid-cols-2 gap-2.5">
                   <button
                     type="button"
-                    onClick={() => {
-                      setPrintOrientation('landscape');
-                      applyPrintOrientationStyle('landscape');
-                    }}
+                    onClick={() => setPrintOrientation('landscape')}
                     className={`p-3 rounded-xl border text-left transition-all cursor-pointer relative ${
                       printOrientation === 'landscape'
                         ? 'bg-emerald-500/15 border-emerald-500 text-white ring-1 ring-emerald-500/40 shadow-md shadow-emerald-950/30'
@@ -1914,16 +1923,13 @@ export const LandTable: React.FC<LandTableProps> = ({
                       </span>
                     </div>
                     <p className="text-[11px] text-slate-400 mt-1 leading-normal">
-                      ตารางบัญชี 11 คอลัมน์กว้างสบาย พอดีหน้ากระดาษ ไม่เบียด
+                       ตารางบัญชี 11 คอลัมน์กว้างสบาย พอดีหน้ากระดาษ ไม่เบียด
                     </p>
                   </button>
 
                   <button
                     type="button"
-                    onClick={() => {
-                      setPrintOrientation('portrait');
-                      applyPrintOrientationStyle('portrait');
-                    }}
+                    onClick={() => setPrintOrientation('portrait')}
                     className={`p-3 rounded-xl border text-left transition-all cursor-pointer relative ${
                       printOrientation === 'portrait'
                         ? 'bg-emerald-500/15 border-emerald-500 text-white ring-1 ring-emerald-500/40 shadow-md shadow-emerald-950/30'
@@ -1950,16 +1956,49 @@ export const LandTable: React.FC<LandTableProps> = ({
                 </div>
               </div>
 
-              {/* Scope Selector */}
+              {/* Scope Selector (Selected Plots vs Filtered vs All) */}
               <div className="space-y-2">
                 <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
                   เลือกขอบเขตข้อมูลที่ต้องการพิมพ์:
                 </label>
-                <div className="grid grid-cols-2 gap-2.5">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  {/* Option 1: Selected Plots */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (selectedPlotIds.length > 0) {
+                        setPrintScope('selected');
+                      }
+                    }}
+                    disabled={selectedPlotIds.length === 0}
+                    className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer relative ${
+                      printScope === 'selected'
+                        ? 'bg-emerald-500/15 border-emerald-500 text-white font-semibold ring-1 ring-emerald-500/30'
+                        : selectedPlotIds.length === 0
+                        ? 'bg-slate-800/40 border-slate-800 text-slate-500 cursor-not-allowed opacity-60'
+                        : 'bg-slate-800/80 border-slate-700 text-slate-400 hover:bg-slate-800'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="font-semibold text-white">เฉพาะที่เลือก</div>
+                      {selectedPlotIds.length > 0 && (
+                        <span className="px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 text-[10px] font-bold">
+                          {selectedPlotIds.length} แปลง
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-cyan-400 font-mono mt-0.5 font-bold">
+                      {selectedPlotIds.length > 0
+                        ? `${selectedPlotIds.length} แปลงที่เลือกไว้`
+                        : '(ยังไม่ได้เลือกแปลง)'}
+                    </div>
+                  </button>
+
+                  {/* Option 2: Filtered Plots */}
                   <button
                     type="button"
                     onClick={() => setPrintScope('filtered')}
-                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                    className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
                       printScope === 'filtered'
                         ? 'bg-emerald-500/15 border-emerald-500 text-white font-semibold ring-1 ring-emerald-500/30'
                         : 'bg-slate-800/80 border-slate-700 text-slate-400 hover:bg-slate-800'
@@ -1967,20 +2006,21 @@ export const LandTable: React.FC<LandTableProps> = ({
                   >
                     <div className="font-semibold text-white">แปลงที่กรองอยู่</div>
                     <div className="text-[11px] text-emerald-400 font-mono mt-0.5 font-bold">
-                      {filteredPlots.length} แปลง (ตามตัวกรองปัจจุบัน)
+                      {filteredPlots.length} แปลง (ตามตัวกรอง)
                     </div>
                   </button>
 
+                  {/* Option 3: All Plots */}
                   <button
                     type="button"
                     onClick={() => setPrintScope('all')}
-                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                    className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
                       printScope === 'all'
                         ? 'bg-emerald-500/15 border-emerald-500 text-white font-semibold ring-1 ring-emerald-500/30'
                         : 'bg-slate-800/80 border-slate-700 text-slate-400 hover:bg-slate-800'
                     }`}
                   >
-                    <div className="font-semibold text-white">แปลงทั้งหมดในพอร์ต</div>
+                    <div className="font-semibold text-white">แปลงทั้งหมด</div>
                     <div className="text-[11px] text-emerald-400 font-mono mt-0.5 font-bold">
                       {plots.length} แปลง (ทั้งพอร์ต)
                     </div>
@@ -2097,7 +2137,13 @@ export const LandTable: React.FC<LandTableProps> = ({
               {printOrientation === 'landscape' ? 'รูปแบบ: แนวนอน (A4 Landscape)' : 'รูปแบบ: แนวตั้ง (A4 Portrait)'}
             </p>
             <p>วันที่พิมพ์: <span className="font-semibold text-black">{new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })} น.</span></p>
-            <p>ขอบเขตข้อมูล: <span className="font-semibold text-black">{printScope === 'all' ? `ทั้งหมด (${plots.length} แปลง)` : `กรองตามเงื่อนไข (${filteredPlots.length} แปลง)`}</span></p>
+            <p>ขอบเขตข้อมูล: <span className="font-semibold text-black">{
+              printScope === 'selected'
+                ? `เฉพาะแปลงที่เลือก (${printPlots.length} แปลง)`
+                : printScope === 'all'
+                ? `ทั้งหมด (${plots.length} แปลง)`
+                : `กรองตามเงื่อนไข (${filteredPlots.length} แปลง)`
+            }</span></p>
           </div>
         </div>
 

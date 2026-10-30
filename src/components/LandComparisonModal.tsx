@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { LandPlot, PortfolioSettings } from '../types/land';
 import { formatCurrency, formatThaiArea, calculatePlotHoldingInfo } from '../services/storage';
+import { triggerPrint } from '../utils/print';
 
 interface LandComparisonModalProps {
   plots: LandPlot[];
@@ -49,7 +50,7 @@ export const LandComparisonModal: React.FC<LandComparisonModalProps> = ({
   }));
 
   const handlePrint = () => {
-    window.print();
+    triggerPrint(plots.length >= 3 ? 'landscape' : 'portrait');
   };
 
   const handleExportCsv = () => {
@@ -93,8 +94,8 @@ export const LandComparisonModal: React.FC<LandComparisonModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/85 backdrop-blur-md">
-      <div className="relative w-full max-w-6xl bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl flex flex-col max-h-[92vh] overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/85 backdrop-blur-md print:static print:p-0 print:bg-transparent print:z-auto print:block">
+      <div className="relative w-full max-w-6xl bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl flex flex-col max-h-[92vh] overflow-hidden print:hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800 bg-slate-800/90 shrink-0">
           <div className="flex items-center gap-3">
@@ -127,11 +128,11 @@ export const LandComparisonModal: React.FC<LandComparisonModalProps> = ({
             </button>
             <button
               onClick={handlePrint}
-              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium flex items-center gap-1.5 cursor-pointer"
-              title="พิมพ์ตารางเปรียบเทียบ"
+              className="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-400/30 text-xs font-semibold flex items-center gap-1.5 shadow-md shadow-indigo-600/25 transition-all cursor-pointer"
+              title="พิมพ์รายงานเปรียบเทียบแปลงที่ดิน (A4 PDF / Print)"
             >
-              <Printer className="w-4 h-4 text-slate-300" />
-              <span className="hidden sm:inline">พิมพ์</span>
+              <Printer className="w-4 h-4 text-white" />
+              <span>พิมพ์รายงาน</span>
             </button>
             <button
               onClick={onClose}
@@ -452,6 +453,184 @@ export const LandComparisonModal: React.FC<LandComparisonModalProps> = ({
           >
             ปิดหน้าต่างเปรียบเทียบ
           </button>
+        </div>
+      </div>
+
+      {/* Printable Land Comparison Report (A4 Format) */}
+      <div id="printable-land-comparison" className="hidden print:block text-black bg-white p-6 max-w-full">
+        {/* Document Header */}
+        <div className="border-b-2 border-black pb-4 mb-4">
+          <div className="flex justify-between items-start">
+            <div>
+              <span className="text-xs uppercase tracking-widest font-bold text-gray-600 block">
+                LAND PORTFOLIO & TRADING LEDGER SYSTEM
+              </span>
+              <h1 className="text-xl font-bold text-black mt-0.5">
+                รายงานการวิเคราะห์เปรียบเทียบแปลงที่ดิน (Land Plot Comparison Report)
+              </h1>
+              <p className="text-xs text-gray-600 mt-1">
+                เปรียบเทียบมิติเนื้อที่ ต้นทุนรวม ต้นทุนต่อตารางวา และศักยภาพผลตอบแทนการลงทุนเคียงข้างกัน ({plots.length} แปลง)
+              </p>
+            </div>
+            <div className="text-right text-xs text-gray-700">
+              <div className="font-bold">วันที่พิมพ์: {new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })}</div>
+              <div>เวลา: {new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })} น.</div>
+              <div className="text-[10px] text-gray-500 mt-0.5 font-mono">DOC: CMP-{Date.now().toString().slice(-6)}</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Comparison Table */}
+        <table className="w-full text-xs border-collapse border border-black mb-6">
+          <thead>
+            <tr className="bg-gray-100 border-b border-black">
+              <th className="p-2 border-r border-black font-bold text-left w-36 bg-gray-200">
+                หัวข้อเปรียบเทียบ
+              </th>
+              {plots.map((plot) => (
+                <th key={plot.id} className="p-2 border-r last:border-r-0 border-black font-bold text-left">
+                  <div className="font-bold text-black">แปลง #{plot.orderNumber}</div>
+                  <div className="text-[11px] font-normal text-gray-700 truncate max-w-[180px]">{plot.title}</div>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-black/30">
+            <tr>
+              <td className="p-2 font-bold bg-gray-50 border-r border-black">สถานะปัจจุบัน</td>
+              {plots.map((p) => (
+                <td key={p.id} className="p-2 border-r last:border-r-0 border-black font-semibold">
+                  {p.status === 'sold' ? 'ขายแล้ว' : p.status === 'consignment' ? 'รับขายฝาก' : p.status === 'for_sale' ? 'กำลังประกาศขาย' : 'ถือครอง'}
+                </td>
+              ))}
+            </tr>
+            <tr>
+              <td className="p-2 font-bold bg-gray-50 border-r border-black">ประเภทกรรมสิทธิ์</td>
+              {plots.map((p) => (
+                <td key={p.id} className="p-2 border-r last:border-r-0 border-black">
+                  {p.landType || '-'}
+                </td>
+              ))}
+            </tr>
+            <tr>
+              <td className="p-2 font-bold bg-gray-50 border-r border-black">ที่ตั้ง (จังหวัด/อำเภอ)</td>
+              {plots.map((p) => (
+                <td key={p.id} className="p-2 border-r last:border-r-0 border-black">
+                  {p.province} / {p.district}
+                </td>
+              ))}
+            </tr>
+            <tr>
+              <td className="p-2 font-bold bg-gray-50 border-r border-black">เลขโฉนด / เอกสารสิทธิ์</td>
+              {plots.map((p) => (
+                <td key={p.id} className="p-2 border-r last:border-r-0 border-black font-mono">
+                  {p.primaryDeedNumber || '-'}
+                </td>
+              ))}
+            </tr>
+            <tr>
+              <td className="p-2 font-bold bg-gray-50 border-r border-black">ขนาดเนื้อที่ (ไร่-งาน-ตร.ว.)</td>
+              {plots.map((p) => (
+                <td key={p.id} className="p-2 border-r last:border-r-0 border-black font-semibold">
+                  {formatThaiArea(p.rai, p.ngan, p.sqWah)}
+                </td>
+              ))}
+            </tr>
+            <tr>
+              <td className="p-2 font-bold bg-gray-50 border-r border-black">เนื้อที่รวม (ตารางวา)</td>
+              {plots.map((p) => (
+                <td key={p.id} className="p-2 border-r last:border-r-0 border-black font-mono">
+                  {(p.totalSqWah || 0).toLocaleString('th-TH')} ตร.ว.
+                </td>
+              ))}
+            </tr>
+            <tr>
+              <td className="p-2 font-bold bg-gray-50 border-r border-black">ราคาซื้อที่ดิน</td>
+              {plots.map((p) => (
+                <td key={p.id} className="p-2 border-r last:border-r-0 border-black font-mono">
+                  {p.purchasePrice.toLocaleString('th-TH')} บาท
+                </td>
+              ))}
+            </tr>
+            <tr>
+              <td className="p-2 font-bold bg-gray-50 border-r border-black">ค่าธรรมเนียม/ภาษี/รังวัด</td>
+              {plots.map((p) => (
+                <td key={p.id} className="p-2 border-r last:border-r-0 border-black font-mono text-gray-700">
+                  {((p.taxAndFees || 0) + (p.surveyCost || 0) + (p.otherExpenses || 0)).toLocaleString('th-TH')} บาท
+                </td>
+              ))}
+            </tr>
+            <tr className="bg-gray-100 font-bold border-t border-b border-black">
+              <td className="p-2 bg-gray-200 border-r border-black text-black">ต้นทุนรวมสุทธิ (Total Cost)</td>
+              {plots.map((p) => (
+                <td key={p.id} className="p-2 border-r last:border-r-0 border-black font-mono text-black">
+                  {p.totalCost.toLocaleString('th-TH')} บาท
+                </td>
+              ))}
+            </tr>
+            <tr>
+              <td className="p-2 font-bold bg-gray-50 border-r border-black">ต้นทุนเฉลี่ยต่อตารางวา</td>
+              {plots.map((p) => (
+                <td key={p.id} className="p-2 border-r last:border-r-0 border-black font-mono">
+                  {p.totalSqWah > 0 ? `${Math.round(p.totalCost / p.totalSqWah).toLocaleString('th-TH')} บาท/ตร.ว.` : '-'}
+                </td>
+              ))}
+            </tr>
+            <tr>
+              <td className="p-2 font-bold bg-gray-50 border-r border-black">ราคาเป้าหมายขาย (KPI Target)</td>
+              {plots.map((p) => (
+                <td key={p.id} className="p-2 border-r last:border-r-0 border-black font-mono font-semibold">
+                  {p.targetSalePrice ? `${p.targetSalePrice.toLocaleString('th-TH')} บาท` : '-'}
+                </td>
+              ))}
+            </tr>
+            <tr>
+              <td className="p-2 font-bold bg-gray-50 border-r border-black">กำไรส่วนต่างคาดหวัง</td>
+              {plots.map((p) => {
+                const diff = (p.targetSalePrice || 0) - p.totalCost;
+                return (
+                  <td key={p.id} className="p-2 border-r last:border-r-0 border-black font-mono font-bold">
+                    {p.targetSalePrice && diff > 0 ? `+${diff.toLocaleString('th-TH')} บาท` : '-'}
+                  </td>
+                );
+              })}
+            </tr>
+            <tr className="bg-gray-50 font-semibold">
+              <td className="p-2 font-bold bg-gray-100 border-r border-black">คาดการณ์ ROI (%)</td>
+              {plots.map((p) => {
+                if (!p.totalCost) return <td key={p.id} className="p-2 border-r last:border-r-0 border-black">-</td>;
+                const target = p.targetSalePrice || (p.totalCost * 1.3);
+                const roi = (((target - p.totalCost) / p.totalCost) * 100).toFixed(1);
+                return (
+                  <td key={p.id} className="p-2 border-r last:border-r-0 border-black font-mono font-bold">
+                    {roi}%
+                  </td>
+                );
+              })}
+            </tr>
+            <tr>
+              <td className="p-2 font-bold bg-gray-50 border-r border-black">ระยะเวลาถือครองปัจจุบัน</td>
+              {plots.map((p) => (
+                <td key={p.id} className="p-2 border-r last:border-r-0 border-black">
+                  {calculatePlotHoldingInfo(p.purchaseDate).formattedDuration}
+                </td>
+              ))}
+            </tr>
+          </tbody>
+        </table>
+
+        {/* Signatures & Approval */}
+        <div className="pt-6 border-t border-gray-300 grid grid-cols-2 gap-8 text-center text-xs mt-6">
+          <div>
+            <div className="border-b border-black w-48 mx-auto mb-2 h-10"></div>
+            <div className="font-bold">ผู้จัดทำรายงานการวิเคราะห์</div>
+            <div className="text-gray-500 text-[10px]">วันที่: ....../....../......</div>
+          </div>
+          <div>
+            <div className="border-b border-black w-48 mx-auto mb-2 h-10"></div>
+            <div className="font-bold">ผู้อนุมัติการลงทุน / กรรมการผู้จัดการ</div>
+            <div className="text-gray-500 text-[10px]">วันที่: ....../....../......</div>
+          </div>
         </div>
       </div>
     </div>

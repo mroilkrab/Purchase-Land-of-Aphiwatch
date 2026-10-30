@@ -240,21 +240,21 @@ html.light .leaflet-popup-tip {
   z-index: 10 !important;
 }
 
-/* Print Styles for reliable browser printing & high-contrast black ink / monochrome paper output */
+/* Print Styles for reliable browser printing & continuous A4 document layout without blank pages */
 @media print {
   @page {
-    size: A4 landscape;
-    margin: 8mm 8mm 10mm 8mm;
+    size: A4;
+    margin: 6mm 7mm 7mm 7mm;
     @bottom-right {
       content: "หน้า " counter(page) " จาก " counter(pages);
-      font-size: 8pt;
+      font-size: 7.5pt;
       font-family: 'Sarabun', 'Prompt', 'Noto Sans Thai', sans-serif;
       color: #334155;
       font-weight: 600;
     }
     @bottom-left {
       content: "ระบบบริหารจัดการพอร์ตที่ดิน (Land Portfolio Management)";
-      font-size: 7.5pt;
+      font-size: 7pt;
       font-family: 'Sarabun', 'Prompt', 'Noto Sans Thai', sans-serif;
       color: #64748b;
     }
@@ -265,18 +265,23 @@ html.light .leaflet-popup-tip {
     width: 100% !important;
     margin: 0 !important;
     padding: 0 !important;
+    height: auto !important;
+    min-height: 0 !important;
   }
 
   html, body, #root, .app-container {
     background: #ffffff !important;
     background-color: #ffffff !important;
     color: #000000 !important;
-    font-size: 9pt !important;
+    font-size: 8.5pt !important;
     width: 100% !important;
     max-width: 100% !important;
     overflow: visible !important;
     margin: 0 !important;
     padding: 0 !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
     font-family: 'Sarabun', 'Prompt', 'Noto Sans Thai', sans-serif !important;
   }
 
@@ -298,6 +303,12 @@ html.light .leaflet-popup-tip {
   .no-print,
   .management-control,
   [class*="management-control"],
+  .action-buttons,
+  [class*="action-buttons"],
+  #land-table-search-bar,
+  #land-table-filters,
+  #land-table-toolbar,
+  #main-land-table-actions,
   .sticky,
   #pdf-toast-container,
   [role="alert"] {
@@ -305,8 +316,14 @@ html.light .leaflet-popup-tip {
     visibility: hidden !important;
   }
 
-  /* Expand print report container */
-  #printable-performance-report, #printable-plot-summary, #printable-land-table-report {
+  /* Expand print report containers & ensure continuous flow without blank page overflows */
+  #printable-performance-report,
+  #printable-plot-summary,
+  #printable-land-table-report,
+  #printable-dashboard-report,
+  #printable-land-comparison,
+  #printable-land-form-summary,
+  #printable-kpi-simulation {
     display: block !important;
     position: static !important;
     left: auto !important;
@@ -315,6 +332,13 @@ html.light .leaflet-popup-tip {
     visibility: visible !important;
     width: 100% !important;
     max-width: 100% !important;
+    min-width: 0 !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    page-break-after: auto !important;
+    break-after: auto !important;
     padding: 0 !important;
     margin: 0 !important;
     background: #ffffff !important;
@@ -324,6 +348,25 @@ html.light .leaflet-popup-tip {
     box-sizing: border-box !important;
   }
 
+  /* Reset modal containers and backdrops when printing */
+  .fixed.inset-0,
+  [role="dialog"],
+  [aria-modal="true"] {
+    position: static !important;
+    background: transparent !important;
+    backdrop-filter: none !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    inset: auto !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
   #printable-land-table-report table {
     width: 100% !important;
     max-width: 100% !important;
@@ -331,24 +374,30 @@ html.light .leaflet-popup-tip {
     border-collapse: collapse !important;
   }
 
-  /* Discrete A4 page structure for multi-page PDF & paper print */
-  .pdf-page {
+  /* Continuous A4 page structure without forced blank pages or artificial min-height overflows */
+  .pdf-page,
+  #printable-plot-summary .pdf-page {
     width: 100% !important;
+    min-width: 0 !important;
     max-width: 100% !important;
-    min-height: 270mm !important;
-    page-break-after: always !important;
-    break-after: page !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    page-break-after: auto !important;
+    break-after: auto !important;
     page-break-inside: avoid !important;
     break-inside: avoid !important;
-    margin: 0 !important;
-    padding: 6mm 4mm !important;
+    margin: 0 0 5mm 0 !important;
+    padding: 0 !important;
     box-sizing: border-box !important;
     background: #ffffff !important;
+    overflow: visible !important;
   }
 
   .pdf-page:last-child {
     page-break-after: auto !important;
     break-after: auto !important;
+    margin-bottom: 0 !important;
   }
 
   /* Prevent Thai text & glyph overlapping */
@@ -455,14 +504,46 @@ html.light .leaflet-popup-tip {
     background-image: none !important;
   }
 
-  /* Page break rules */
-  .page-break-before {
-    page-break-before: always !important;
-    break-before: page !important;
-  }
-
-  .avoid-break {
+  /* SVG vector & D3 chart print optimization */
+  svg {
+    max-width: 100% !important;
+    height: auto !important;
+    overflow: visible !important;
     page-break-inside: avoid !important;
     break-inside: avoid !important;
   }
+
+  /* Page break rules: continuous and tightly packed layout without empty pages */
+  .page-break {
+    page-break-after: auto !important;
+    break-after: auto !important;
+  }
+
+  .page-break-before {
+    page-break-before: auto !important;
+    break-before: auto !important;
+  }
+
+  .avoid-break,
+  .print-avoid-break,
+  .print-card,
+  [class*="rounded-xl"],
+  [class*="rounded-2xl"],
+  tr,
+  table,
+  .border {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  /* Compact spacing for paper print to fit content without gaps */
+  .space-y-6 > * + * {
+    margin-top: 12px !important;
+  }
+}
+
+/* Standalone .page-break class */
+.page-break {
+  page-break-after: auto !important;
+  break-after: auto !important;
 }

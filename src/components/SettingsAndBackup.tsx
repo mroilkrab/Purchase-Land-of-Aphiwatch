@@ -35,7 +35,7 @@ import {
 } from 'lucide-react';
 import { PortfolioSettings, LandPlot } from '../types/land';
 import { createGoogleSheet, updateExistingGoogleSheet } from '../services/googleSheets';
-import { getAccessToken, syncToFirestore, loadFromFirestore, googleSignIn } from '../services/firebaseAuth';
+import { getAccessToken, syncToFirestore, loadFromFirestore, googleSignIn, getDomainDiagnosticInfo } from '../services/firebaseAuth';
 import { exportToJsonFile, exportToCsvFile, formatCurrency, formatThaiArea } from '../services/storage';
 import { parseCsvToPlots, getSampleCsvTemplate, CsvParseResult } from '../services/csvImporter';
 import { 
@@ -66,6 +66,7 @@ interface SettingsAndBackupProps {
   user: User | null;
   onLoginGoogle: () => void;
   onNavigateToTable?: () => void;
+  onOpenGoogleAuthTroubleshoot?: () => void;
 }
 
 export const SettingsAndBackup: React.FC<SettingsAndBackupProps> = ({
@@ -77,6 +78,7 @@ export const SettingsAndBackup: React.FC<SettingsAndBackupProps> = ({
   user,
   onLoginGoogle,
   onNavigateToTable,
+  onOpenGoogleAuthTroubleshoot,
 }) => {
   const [formData, setFormData] = useState<PortfolioSettings>(settings);
   const [existingSheetId, setExistingSheetId] = useState(settings.googleSheetId || '');
@@ -957,6 +959,88 @@ export const SettingsAndBackup: React.FC<SettingsAndBackupProps> = ({
               </div>
             </div>
           </div>
+
+          {/* Vercel & Domain Authorization Setup Card */}
+          {(() => {
+            const diag = getDomainDiagnosticInfo();
+            return (
+              <div className="p-6 rounded-2xl bg-gradient-to-r from-blue-950/40 via-slate-900 to-indigo-950/30 border border-blue-500/30 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-xl bg-blue-500/15 border border-blue-500/30 text-blue-400 flex items-center justify-center shrink-0">
+                      <Globe className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-white text-sm sm:text-base flex items-center gap-2">
+                        การเชื่อมต่อ Google บน Vercel & Custom Domain
+                        {diag.isVercel && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                            Vercel Detected
+                          </span>
+                        )}
+                      </h4>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        แก้ไขปัญหา "เข้าสู่ระบบ Google ไม่ได้บน Vercel" ด้วยการอนุญาตโดเมนใน Firebase Console
+                      </p>
+                    </div>
+                  </div>
+
+                  {onOpenGoogleAuthTroubleshoot && (
+                    <button
+                      type="button"
+                      onClick={onOpenGoogleAuthTroubleshoot}
+                      className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs flex items-center gap-1.5 shadow-md shadow-indigo-600/20 transition-all cursor-pointer self-start sm:self-auto"
+                    >
+                      <HelpCircle className="w-3.5 h-3.5" />
+                      <span>เปิดคู่มือแก้ไข Vercel</span>
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 text-xs">
+                  <div className="sm:col-span-7 p-3 rounded-xl bg-slate-950/80 border border-slate-800 space-y-2">
+                    <span className="text-slate-400 block font-medium">ชื่อโดเมนปัจจุบัน (Hostname):</span>
+                    <div className="flex items-center justify-between gap-2 p-2 rounded-lg bg-slate-900 border border-slate-700/80">
+                      <code className="font-mono font-bold text-amber-300 text-xs sm:text-sm truncate">
+                        {diag.hostname}
+                      </code>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(diag.hostname);
+                        }}
+                        className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-medium border border-slate-700 shrink-0 cursor-pointer"
+                        title="คัดลอกชื่อโดเมน"
+                      >
+                        คัดลอก
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                      หากล็อกอิน Google บน Vercel ไม่สำเร็จ ให้นำชื่อโดเมนนี้ไปใส่ที่ <strong>Firebase Console -&gt; Authentication -&gt; Settings -&gt; Authorized domains</strong>
+                    </p>
+                  </div>
+
+                  <div className="sm:col-span-5 p-3 rounded-xl bg-slate-950/80 border border-slate-800 space-y-2 flex flex-col justify-between">
+                    <div>
+                      <span className="text-slate-400 block font-medium">Firebase Project ID:</span>
+                      <code className="font-mono text-emerald-400 font-bold text-xs">{diag.projectId}</code>
+                    </div>
+                    <div className="space-y-1.5 pt-1">
+                      <a
+                        href={diag.firebaseConsoleSettingsUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="w-full py-1.5 px-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 font-medium text-xs flex items-center justify-center gap-1.5 transition-colors"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        <span>เปิด Firebase Console: Settings</span>
+                      </a>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Offline File Backup & Restore (JSON & CSV) */}
           <div className="p-6 rounded-2xl bg-slate-900 border border-slate-800 space-y-4">

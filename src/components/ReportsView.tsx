@@ -1,4 +1,5 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
+import * as d3 from 'd3';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 import { 
@@ -24,10 +25,18 @@ import {
   FileText,
   Eye,
   ExternalLink,
-  Check
+  Check,
+  Sliders,
+  CheckSquare,
+  Square,
+  X,
+  Sparkles,
+  ChevronRight,
+  Info
 } from 'lucide-react';
 import { LandPlot, PortfolioSettings } from '../types/land';
 import { formatCurrency, formatThaiArea } from '../services/storage';
+import { triggerPrint } from '../utils/print';
 
 interface ReportsViewProps {
   plots: LandPlot[];
@@ -43,6 +52,546 @@ const extractYear = (dateStr?: string): string => {
   return 'ไม่ระบุปี';
 };
 
+// ==========================================
+// D3 Component: Revenue Forecast vs Realized
+// ==========================================
+interface RevenueForecastChartProps {
+  plots: LandPlot[];
+  paperPrintMode: boolean;
+  onSelectPlot?: (plot: LandPlot) => void;
+}
+
+export const RevenueForecastVsRealizedChart: React.FC<RevenueForecastChartProps> = ({
+  plots,
+  paperPrintMode,
+  onSelectPlot,
+}) => {
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const [hoveredPoint, setHoveredPoint] = useState<any | null>(null);
+  const [hoverPosition, setHoverPosition] = useState<{ x: number; y: number } | null>(null);
+
+  // Compute cumulative series sorted chronologically
+  const chartData = useMemo(() => {
+    // Sort plots by acquisition date or orderNumber
+    const sorted = [...plots].sort((a, b) => {
+      const parsePlotDate = (d?: string) => {
+        if (!d || d === '-') return 0;
+        const parts = d.split(/[/-]/);
+        if (parts.length === 3) {
+          let [day, month, year] = parts.map(Number);
+          if (year > 2400) year -= 543;
+          return new Date(year, (month || 1) - 1, day || 1).getTime() || 0;
+        }
+        return 0;
+      };
+      const tA = parsePlotDate(a.purchaseDate);
+      const tB = parsePlotDate(b.purchaseDate);
+      if (tA !== tB && tA > 0 && tB > 0) return tA - tB;
+      return a.orderNumber - b.orderNumber;
+    });
+
+    let cumCost = 0;
+    let cumForecast = 0;
+    let cumRealized = 0;
+
+    return sorted.map((p, idx) => {
+      const cost = Number(p.totalCost) || 0;
+      const forecast = Number(p.targetSalePrice) || 0;
+      const isSold = p.status === 'sold';
+      const soldAmount = isSold ? (Number(p.soldPrice) || 0) : 0;
+
+      cumCost += cost;
+      cumForecast += forecast;
+      cumRealized += soldAmount;
+
+      return {
+        index: idx,
+        plot: p,
+        key: `plot-${p.id}-${idx}`,
+        orderNumber: p.orderNumber,
+        title: p.title,
+        purchaseDate: p.purchaseDate || 'ไม่ระบุ',
+        saleDate: p.saleDate || '',
+        status: p.status,
+        isSold,
+        cost,
+        forecast,
+        soldAmount,
+        cumCost,
+        cumForecast,
+        cumRealized,
+        profitForecast: cumForecast - cumCost,
+        profitRealized: cumRealized - cumCost,
+      };
+    });
+  }, [plots]);
+
+  // Overall chart summary metrics
+  const totals = useMemo(() => {
+    if (chartData.length === 0) {
+      return { totalForecast: 0, totalRealized: 0, totalCost: 0, soldCount: 0, totalCount: 0, pct: 0 };
+    }
+    const last = chartData[chartData.length - 1];
+    const soldCount = chartData.filter((d) => d.isSold).length;
+    const pct = last.cumForecast > 0 ? (last.cumRealized / last.cumForecast) * 100 : 0;
+    return {
+      totalForecast: last.cumForecast,
+      totalRealized: last.cumRealized,
+      totalCost: last.cumCost,
+      soldCount,
+      totalCount: chartData.length,
+      pct,
+    };
+  }, [chartData]);
+
+  // D3 Render effect
+  useEffect(() => {
+    if (!svgRef.current || chartData.length === 0) return;
+
+    const svg = d3.select(svgRef.current);
+    svg.selectAll('*').remove();
+
+    const width = 860;
+    const height = 340;
+    const margin = { top: 30, right: 35, bottom: 65, left: 85 };
+    const innerWidth = width - margin.left - margin.right;
+    const innerHeight = height - margin.top - margin.bottom;
+
+    const g = svg
+      .append('g')
+      .attr('transform', `translate(${margin.left},${margin.top})`);
+
+    // Calculate maximum Y value
+    const maxY = Math.max(
+      d3.max(chartData, (d) => Math.max(d.cumForecast, d.cumRealized, d.cumCost)) || 1000000,
+      1000000
+    );
+
+    const xScale = d3
+      .scalePoint<string>()
+      .domain(chartData.map((d) => d.key))
+      .range([0, innerWidth])
+      .padding(0.25);
+
+    const yScale = d3
+      .scaleLinear()
+      .domain([0, maxY * 1.12])
+      .range([innerHeight, 0])
+      .nice();
+
+    // Horizontal Grid lines
+    const yAxisGrid = d3.axisLeft(yScale)
+      .tickSize(-innerWidth)
+      .tickFormat(() => '')
+      .ticks(5);
+
+    g.append('g')
+      .attr('class', 'grid')
+      .call(yAxisGrid)
+      .call((grid) => {
+        grid.select('.domain').remove();
+        grid.selectAll('.tick line')
+          .attr('stroke', paperPrintMode ? '#cbd5e1' : '#334155')
+          .attr('stroke-dasharray', '3,3')
+          .attr('stroke-opacity', paperPrintMode ? 0.8 : 0.4);
+      });
+
+    // Area Fill for Forecast
+    const areaForecast = d3.area<typeof chartData[0]>()
+      .x((d) => xScale(d.key) ?? 0)
+      .y0(innerHeight)
+      .y1((d) => yScale(d.cumForecast))
+      .curve(d3.curveMonotoneX);
+
+    // Area Fill for Realized
+    const areaRealized = d3.area<typeof chartData[0]>()
+      .x((d) => xScale(d.key) ?? 0)
+      .y0(innerHeight)
+      .y1((d) => yScale(d.cumRealized))
+      .curve(d3.curveMonotoneX);
+
+    if (!paperPrintMode) {
+      const defs = svg.append('defs');
+      
+      const gradForecast = defs.append('linearGradient')
+        .attr('id', 'd3-grad-forecast')
+        .attr('x1', '0%').attr('y1', '0%').attr('x2', '0%').attr('y2', '100%');
+      gradForecast.append('stop').attr('offset', '0%').attr('stop-color', '#38bdf8').attr('stop-opacity', 0.22);
+      gradForecast.append('stop').attr('offset', '100%').attr('stop-color', '#38bdf8').attr('stop-opacity', 0.0);
+
+      const gradRealized = defs.append('linearGradient')
+        .attr('id', 'd3-grad-realized')
+        .attr('x1', '0%').attr('y1', '0%').attr('x2', '0%').attr('y2', '100%');
+      gradRealized.append('stop').attr('offset', '0%').attr('stop-color', '#10b981').attr('stop-opacity', 0.35);
+      gradRealized.append('stop').attr('offset', '100%').attr('stop-color', '#10b981').attr('stop-opacity', 0.0);
+
+      g.append('path')
+        .datum(chartData)
+        .attr('fill', 'url(#d3-grad-forecast)')
+        .attr('d', areaForecast);
+
+      g.append('path')
+        .datum(chartData)
+        .attr('fill', 'url(#d3-grad-realized)')
+        .attr('d', areaRealized);
+    }
+
+    // Line Generators
+    const lineCost = d3.line<typeof chartData[0]>()
+      .x((d) => xScale(d.key) ?? 0)
+      .y((d) => yScale(d.cumCost))
+      .curve(d3.curveMonotoneX);
+
+    const lineForecast = d3.line<typeof chartData[0]>()
+      .x((d) => xScale(d.key) ?? 0)
+      .y((d) => yScale(d.cumForecast))
+      .curve(d3.curveMonotoneX);
+
+    const lineRealized = d3.line<typeof chartData[0]>()
+      .x((d) => xScale(d.key) ?? 0)
+      .y((d) => yScale(d.cumRealized))
+      .curve(d3.curveMonotoneX);
+
+    // 1. Draw Cumulative Cost Line (Amber / Slate)
+    g.append('path')
+      .datum(chartData)
+      .attr('fill', 'none')
+      .attr('stroke', paperPrintMode ? '#475569' : '#f59e0b')
+      .attr('stroke-width', paperPrintMode ? 2 : 2.5)
+      .attr('stroke-dasharray', '5,4')
+      .attr('d', lineCost);
+
+    // 2. Draw Revenue Forecast Line (Blue / Sky)
+    g.append('path')
+      .datum(chartData)
+      .attr('fill', 'none')
+      .attr('stroke', paperPrintMode ? '#0f172a' : '#38bdf8')
+      .attr('stroke-width', paperPrintMode ? 2.5 : 3)
+      .attr('d', lineForecast);
+
+    // 3. Draw Realized Revenue Line (Emerald / Pure Black on Paper)
+    // DYNAMIC: Immediately tracks sold plots!
+    g.append('path')
+      .datum(chartData)
+      .attr('fill', 'none')
+      .attr('stroke', paperPrintMode ? '#000000' : '#10b981')
+      .attr('stroke-width', paperPrintMode ? 3.5 : 3.5)
+      .attr('d', lineRealized);
+
+    // Data Markers & Dots
+    chartData.forEach((d) => {
+      const x = xScale(d.key) ?? 0;
+
+      // Cost marker
+      g.append('circle')
+        .attr('cx', x)
+        .attr('cy', yScale(d.cumCost))
+        .attr('r', 3)
+        .attr('fill', paperPrintMode ? '#ffffff' : '#f59e0b')
+        .attr('stroke', paperPrintMode ? '#475569' : '#b45309')
+        .attr('stroke-width', 1.5);
+
+      // Forecast marker
+      g.append('circle')
+        .attr('cx', x)
+        .attr('cy', yScale(d.cumForecast))
+        .attr('r', 4)
+        .attr('fill', paperPrintMode ? '#ffffff' : '#0284c7')
+        .attr('stroke', paperPrintMode ? '#0f172a' : '#38bdf8')
+        .attr('stroke-width', 2);
+
+      // Realized marker: Larger and prominent if plot is sold!
+      const isSold = d.isSold;
+      g.append('circle')
+        .attr('cx', x)
+        .attr('cy', yScale(d.cumRealized))
+        .attr('r', isSold ? 6 : 3.5)
+        .attr('fill', isSold ? (paperPrintMode ? '#000000' : '#10b981') : (paperPrintMode ? '#cbd5e1' : '#064e3b'))
+        .attr('stroke', paperPrintMode ? '#000000' : '#ffffff')
+        .attr('stroke-width', isSold ? 2 : 1.5);
+    });
+
+    // X Axis
+    const xAxis = d3.axisBottom(xScale)
+      .tickFormat((d) => {
+        const item = chartData.find((it) => it.key === d);
+        if (!item) return '';
+        const shortTitle = item.title.length > 7 ? item.title.slice(0, 7) + '..' : item.title;
+        return `#${item.orderNumber} ${shortTitle}`;
+      });
+
+    const xAxisG = g.append('g')
+      .attr('transform', `translate(0,${innerHeight})`)
+      .call(xAxis);
+
+    xAxisG.select('.domain')
+      .attr('stroke', paperPrintMode ? '#334155' : '#475569');
+
+    xAxisG.selectAll('.tick text')
+      .attr('transform', 'rotate(-32)')
+      .attr('text-anchor', 'end')
+      .attr('dx', '-0.5em')
+      .attr('dy', '0.6em')
+      .attr('font-size', '9.5px')
+      .attr('font-family', 'Sarabun, Prompt, sans-serif')
+      .attr('fill', paperPrintMode ? '#0f172a' : '#94a3b8');
+
+    // Y Axis in Thai Baht Millions
+    const formatYAxis = (d: d3.NumberValue) => {
+      const val = Number(d);
+      if (val === 0) return '0 ฿';
+      if (val >= 1000000) {
+        return `${(val / 1000000).toFixed(val % 1000000 === 0 ? 0 : 1)}M ฿`;
+      }
+      if (val >= 1000) {
+        return `${(val / 1000).toFixed(0)}k ฿`;
+      }
+      return `${val} ฿`;
+    };
+
+    const yAxis = d3.axisLeft(yScale)
+      .ticks(5)
+      .tickFormat(formatYAxis);
+
+    const yAxisG = g.append('g').call(yAxis);
+
+    yAxisG.select('.domain')
+      .attr('stroke', paperPrintMode ? '#334155' : '#475569');
+
+    yAxisG.selectAll('.tick text')
+      .attr('font-size', '10px')
+      .attr('font-family', 'Sarabun, Prompt, monospace')
+      .attr('font-weight', '600')
+      .attr('fill', paperPrintMode ? '#0f172a' : '#94a3b8');
+
+    // Interactive Overlay for Tooltip Tracking
+    const overlay = g.append('rect')
+      .attr('width', innerWidth)
+      .attr('height', innerHeight)
+      .attr('fill', 'transparent')
+      .attr('cursor', 'crosshair');
+
+    overlay.on('mousemove', (event) => {
+      const [mouseX] = d3.pointer(event);
+      let closest = chartData[0];
+      let minDist = Infinity;
+      chartData.forEach((d) => {
+        const x = xScale(d.key) ?? 0;
+        const dist = Math.abs(x - mouseX);
+        if (dist < minDist) {
+          minDist = dist;
+          closest = d;
+        }
+      });
+
+      if (closest) {
+        const xPos = (xScale(closest.key) ?? 0) + margin.left;
+        setHoverPosition({ x: xPos, y: event.clientY });
+        setHoveredPoint(closest);
+      }
+    });
+
+    overlay.on('mouseleave', () => {
+      setHoveredPoint(null);
+      setHoverPosition(null);
+    });
+
+  }, [chartData, paperPrintMode]);
+
+  return (
+    <div className={`p-5 rounded-xl border space-y-4 shadow-sm ${
+      paperPrintMode
+        ? 'bg-white border-2 border-slate-300 text-slate-900'
+        : 'bg-slate-900 border-slate-800 text-slate-100'
+    }`}>
+      {/* Header & Dynamic Live Badge */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <div>
+          <div className="flex items-center gap-2">
+            <h3 className={`font-bold text-sm sm:text-base flex items-center gap-2 ${
+              paperPrintMode ? 'text-slate-950 font-extrabold' : 'text-white'
+            }`}>
+              <TrendingUp className={`w-4 h-4 ${paperPrintMode ? 'text-slate-900' : 'text-emerald-400'}`} />
+              กราฟเป้ารายได้สะสมเทียบยอดขายจริง (Revenue Forecast vs Realized)
+            </h3>
+            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+              paperPrintMode
+                ? 'bg-slate-100 text-slate-900 border-slate-300'
+                : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+            }`}>
+              D3 Engine Live
+            </span>
+          </div>
+          <p className={`text-xs mt-0.5 ${paperPrintMode ? 'text-slate-700 font-medium' : 'text-slate-400'}`}>
+            กราฟจำลองแนวโน้มการแปลงสินทรัพย์เป็นเงินสด อัปเดตเส้นรายได้จริงสะสมอัตโนมัติทันทีที่มีการบันทึกขายแปลงที่ดิน
+          </p>
+        </div>
+
+        {/* Dynamic Realized Counter Pill */}
+        <div className={`px-3 py-1.5 rounded-xl border flex items-center gap-2 text-xs font-mono ${
+          paperPrintMode 
+            ? 'bg-slate-50 border-slate-400 text-slate-950' 
+            : 'bg-slate-800/80 border-slate-700 text-slate-200'
+        }`}>
+          <span className="font-semibold">ขายแล้ว:</span>
+          <span className={`font-bold ${paperPrintMode ? 'text-slate-950 underline' : 'text-emerald-400'}`}>
+            {totals.soldCount} / {totals.totalCount} แปลง
+          </span>
+          <span className={`text-[11px] font-bold px-1.5 py-0.2 rounded ${
+            totals.pct > 0 ? (paperPrintMode ? 'bg-slate-200 text-slate-950' : 'bg-emerald-500/20 text-emerald-300') : 'text-slate-500'
+          }`}>
+            {totals.pct.toFixed(1)}% ของเป้า
+          </span>
+        </div>
+      </div>
+
+      {/* KPI 3-Column Summary Strip */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+        <div className={`p-3 rounded-lg border ${
+          paperPrintMode ? 'bg-slate-50 border-slate-300' : 'bg-slate-950/60 border-slate-800'
+        }`}>
+          <div className="flex items-center justify-between text-xs">
+            <span className={paperPrintMode ? 'text-slate-700 font-semibold' : 'text-sky-400 font-medium'}>
+              🔵 เป้าหมายรายได้สะสม (Forecast Target)
+            </span>
+          </div>
+          <div className={`text-lg sm:text-xl font-mono font-extrabold mt-1 ${
+            paperPrintMode ? 'text-slate-950' : 'text-white'
+          }`}>
+            {formatCurrency(totals.totalForecast)}
+          </div>
+          <div className={`text-[11px] ${paperPrintMode ? 'text-slate-600' : 'text-slate-400'}`}>
+            ราคาตั้งใจขายรวมทุกแปลงในรายงาน
+          </div>
+        </div>
+
+        <div className={`p-3 rounded-lg border ${
+          paperPrintMode ? 'bg-slate-50 border-slate-300' : 'bg-slate-950/60 border-slate-800'
+        }`}>
+          <div className="flex items-center justify-between text-xs">
+            <span className={paperPrintMode ? 'text-slate-900 font-bold' : 'text-emerald-400 font-medium'}>
+              🟢 ยอดขายจริงสะสม (Realized Revenue)
+            </span>
+          </div>
+          <div className={`text-lg sm:text-xl font-mono font-extrabold mt-1 ${
+            paperPrintMode ? 'text-slate-950' : 'text-emerald-400'
+          }`}>
+            {formatCurrency(totals.totalRealized)}
+          </div>
+          <div className={`text-[11px] ${paperPrintMode ? 'text-slate-600' : 'text-slate-400'}`}>
+            รับรู้จริงแล้ว {totals.soldCount} แปลง (อัปเดตอัตโนมัติ)
+          </div>
+        </div>
+
+        <div className={`p-3 rounded-lg border ${
+          paperPrintMode ? 'bg-slate-50 border-slate-300' : 'bg-slate-950/60 border-slate-800'
+        }`}>
+          <div className="flex items-center justify-between text-xs">
+            <span className={paperPrintMode ? 'text-slate-700 font-semibold' : 'text-amber-400 font-medium'}>
+              🟠 เงินลงทุนสะสม (Cumulative Capital Cost)
+            </span>
+          </div>
+          <div className={`text-lg sm:text-xl font-mono font-extrabold mt-1 ${
+            paperPrintMode ? 'text-slate-950' : 'text-amber-300'
+          }`}>
+            {formatCurrency(totals.totalCost)}
+          </div>
+          <div className={`text-[11px] ${paperPrintMode ? 'text-slate-600' : 'text-slate-400'}`}>
+            ต้นทุนรวมซื้อ + ค่าธรรมเนียม + รังวัด
+          </div>
+        </div>
+      </div>
+
+      {/* D3 SVG Chart Container */}
+      <div className="relative w-full overflow-x-auto pt-2">
+        <svg
+          ref={svgRef}
+          className="w-full h-auto min-w-[700px] select-none"
+          viewBox="0 0 860 340"
+          preserveAspectRatio="xMidYMid meet"
+        />
+
+        {/* Dynamic Hover Tooltip */}
+        {hoveredPoint && (
+          <div
+            className={`absolute top-2 z-20 pointer-events-none p-3 rounded-xl shadow-2xl border text-xs font-sans transition-all backdrop-blur-md ${
+              paperPrintMode
+                ? 'bg-white/95 border-2 border-slate-900 text-slate-950'
+                : 'bg-slate-950/95 border border-slate-700 text-slate-100'
+            }`}
+            style={{
+              left: Math.min(Math.max(hoverPosition?.x || 50, 40), 620),
+            }}
+          >
+            <div className="flex items-center justify-between gap-3 border-b pb-1 mb-2 font-bold">
+              <span>#{hoveredPoint.orderNumber} {hoveredPoint.title}</span>
+              <span className={`px-2 py-0.5 rounded text-[10px] ${
+                hoveredPoint.isSold 
+                  ? (paperPrintMode ? 'bg-slate-200 text-slate-950' : 'bg-emerald-500/20 text-emerald-400')
+                  : (paperPrintMode ? 'bg-slate-100 text-slate-700' : 'bg-slate-800 text-slate-400')
+              }`}>
+                {hoveredPoint.isSold ? 'ขายแล้ว (Sold)' : 'ถือครอง (Holding)'}
+              </span>
+            </div>
+
+            <div className="space-y-1 font-mono text-[11px]">
+              <div className="flex justify-between gap-4">
+                <span className={paperPrintMode ? 'text-slate-700' : 'text-sky-300'}>เป้ารายได้สะสม:</span>
+                <span className="font-bold">{formatCurrency(hoveredPoint.cumForecast)}</span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className={paperPrintMode ? 'text-slate-900 font-bold' : 'text-emerald-400'}>ยอดขายจริงสะสม:</span>
+                <span className={`font-bold ${paperPrintMode ? 'text-slate-950' : 'text-emerald-400'}`}>
+                  {formatCurrency(hoveredPoint.cumRealized)}
+                </span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className={paperPrintMode ? 'text-slate-700' : 'text-amber-400'}>ต้นทุนสะสม:</span>
+                <span className="font-bold">{formatCurrency(hoveredPoint.cumCost)}</span>
+              </div>
+              <div className="flex justify-between gap-4 pt-1 border-t">
+                <span className="font-semibold">กำไรสุทธิรับรู้แล้ว:</span>
+                <span className={`font-extrabold ${hoveredPoint.profitRealized >= 0 ? (paperPrintMode ? 'text-slate-950 font-bold' : 'text-emerald-400') : 'text-rose-400'}`}>
+                  {hoveredPoint.profitRealized >= 0 ? `+${formatCurrency(hoveredPoint.profitRealized)}` : formatCurrency(hoveredPoint.profitRealized)}
+                </span>
+              </div>
+            </div>
+
+            <div className="mt-2 text-[10px] text-slate-400 font-sans border-t pt-1 flex justify-between">
+              <span>วันที่ซื้อ: {hoveredPoint.purchaseDate}</span>
+              {hoveredPoint.saleDate && <span>วันที่ขาย: {hoveredPoint.saleDate}</span>}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Chart Legend */}
+      <div className={`flex flex-wrap items-center justify-between text-xs pt-2 border-t ${
+        paperPrintMode ? 'border-slate-300 text-slate-800' : 'border-slate-800 text-slate-400'
+      }`}>
+        <div className="flex flex-wrap items-center gap-4">
+          <div className="flex items-center gap-1.5">
+            <span className={`w-3.5 h-1 rounded ${paperPrintMode ? 'bg-slate-900' : 'bg-sky-400'}`} />
+            <span className="font-medium">เป้ารายได้ (Forecast Target)</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className={`w-3.5 h-1 rounded ${paperPrintMode ? 'bg-black' : 'bg-emerald-500'}`} />
+            <span className="font-bold">ยอดขายจริง (Realized Revenue - ขายแล้ว)</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className={`w-3.5 h-1 border-b-2 border-dashed ${paperPrintMode ? 'border-slate-600' : 'border-amber-400'}`} />
+            <span className="font-medium">เงินลงทุนสะสม (Total Cost)</span>
+          </div>
+        </div>
+
+        <div className={`text-[11px] font-mono ${paperPrintMode ? 'text-slate-700' : 'text-slate-500'}`}>
+          *สร้างด้วย D3.js รองรับการขยายและการสั่งพิมพ์คมชัดระดับ Vector
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export const ReportsView: React.FC<ReportsViewProps> = ({
   plots,
   settings,
@@ -50,12 +599,25 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 }) => {
   const [selectedYear, setSelectedYear] = useState<string>('all');
   const [selectedLandType, setSelectedLandType] = useState<string>('all');
-  const [reportSubTab, setReportSubTab] = useState<'landType' | 'timeline' | 'performance'>('landType');
+  const [reportSubTab, setReportSubTab] = useState<'forecast' | 'landType' | 'timeline' | 'performance'>('forecast');
   const [isGeneratingPdf, setIsGeneratingPdf] = useState<boolean>(false);
   const [pdfSuccessToast, setPdfSuccessToast] = useState<string | null>(null);
   // Default to Paper / Monochrome-friendly High Contrast Mode for black ink printing
   const [paperPrintMode, setPaperPrintMode] = useState<boolean>(true);
   const reportRef = useRef<HTMLDivElement>(null);
+
+  // Print Configuration Modal state (allowing customizable plot scopes and report sections)
+  const [isPrintConfigModalOpen, setIsPrintConfigModalOpen] = useState<boolean>(false);
+  const [reportPlotScope, setReportPlotScope] = useState<'all' | 'filtered' | 'selected'>('filtered');
+  const [selectedReportPlotIds, setSelectedReportPlotIds] = useState<string[]>([]);
+  const [reportSections, setReportSections] = useState({
+    executiveSummary: true,
+    d3Chart: true,
+    landType: true,
+    timeline: true,
+    performance: true,
+    insights: true,
+  });
 
   // Extract all distinct years present in the dataset and sort them chronologically
   const allYears = useMemo(() => {
@@ -85,7 +647,25 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     });
   }, [plots, selectedYear, selectedLandType]);
 
-  // Total Portfolio Metrics for filtered selection
+  // Sync selectedReportPlotIds if empty
+  useEffect(() => {
+    if (selectedReportPlotIds.length === 0 && filteredPlots.length > 0) {
+      setSelectedReportPlotIds(filteredPlots.map((p) => p.id));
+    }
+  }, [filteredPlots]);
+
+  // Active plots for report rendering based on chosen plot scope
+  const activeReportPlots = useMemo(() => {
+    if (reportPlotScope === 'all') return plots;
+    if (reportPlotScope === 'selected') {
+      const idSet = new Set(selectedReportPlotIds);
+      const selected = plots.filter((p) => idSet.has(p.id));
+      return selected.length > 0 ? selected : filteredPlots;
+    }
+    return filteredPlots;
+  }, [plots, filteredPlots, reportPlotScope, selectedReportPlotIds]);
+
+  // Total Portfolio Metrics for active report plots
   const metrics = useMemo(() => {
     let totalCost = 0;
     let totalPurchase = 0;
@@ -95,7 +675,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     let totalRealizedProfit = 0;
     let totalSqWah = 0;
 
-    filteredPlots.forEach((p) => {
+    activeReportPlots.forEach((p) => {
       const cost = Number(p.totalCost) || 0;
       const purchase = Number(p.purchasePrice) || 0;
       const target = Number(p.targetSalePrice) || 0;
@@ -115,7 +695,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       }
     });
 
-    const activePlots = filteredPlots.filter((p) => p.status !== 'sold');
+    const activePlots = activeReportPlots.filter((p) => p.status !== 'sold');
     const activePlotsCost = activePlots.reduce((sum, p) => sum + (Number(p.totalCost) || 0), 0);
     const activePlotsTarget = activePlots.reduce((sum, p) => sum + (Number(p.targetSalePrice) || 0), 0);
 
@@ -133,9 +713,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       overallROI,
       totalSqWah,
       totalRai: Number((totalSqWah / 400).toFixed(2)),
-      count: filteredPlots.length,
+      count: activeReportPlots.length,
     };
-  }, [filteredPlots]);
+  }, [activeReportPlots]);
 
   // P&L Grouped by Land Type
   const landTypeReport = useMemo(() => {
@@ -155,7 +735,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       projectedProfit: number;
     }>();
 
-    filteredPlots.forEach((p) => {
+    activeReportPlots.forEach((p) => {
       const type = p.landType || 'อื่นๆ';
       if (!map.has(type)) {
         map.set(type, {
@@ -204,7 +784,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     });
 
     return Array.from(map.values()).sort((a, b) => b.totalCost - a.totalCost);
-  }, [filteredPlots]);
+  }, [activeReportPlots]);
 
   // P&L Grouped by Time Period (Yearly Timeline)
   const timelineReport = useMemo(() => {
@@ -221,7 +801,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       totalSqWah: number;
     }>();
 
-    filteredPlots.forEach((p) => {
+    activeReportPlots.forEach((p) => {
       const year = extractYear(p.purchaseDate);
       if (!map.has(year)) {
         map.set(year, {
@@ -267,19 +847,17 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       if (b.year === 'ไม่ระบุปี') return -1;
       return parseInt(a.year) - parseInt(b.year);
     });
-  }, [filteredPlots]);
+  }, [activeReportPlots]);
 
   // Print Report Handler (Native browser dialog optimized for high-contrast paper)
   const handlePrint = () => {
     // Ensure paper print mode is enabled for maximum black-ink contrast
     const wasPaperMode = paperPrintMode;
     setPaperPrintMode(true);
-    setTimeout(() => {
-      window.print();
-      if (!wasPaperMode) {
-        setTimeout(() => setPaperPrintMode(false), 1000);
-      }
-    }, 150);
+    triggerPrint('portrait');
+    if (!wasPaperMode) {
+      setTimeout(() => setPaperPrintMode(false), 1200);
+    }
   };
 
   // Download or Open Printable PDF Report using jsPDF + html2canvas
@@ -338,7 +916,15 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
       // Slice the canvas page by page to avoid overlapping or chopped text lines across pages
       const pageHeightPx = Math.floor((canvas.width * contentHeight) / contentWidth);
-      const totalPagesCount = Math.max(1, Math.ceil(canvas.height / pageHeightPx));
+      const rawPagesCount = Math.ceil(canvas.height / pageHeightPx);
+      let totalPagesCount = Math.max(1, rawPagesCount);
+      // Eliminate blank trailing page if residue is just padding/empty space (< 30px)
+      if (totalPagesCount > 1) {
+        const lastPageH = canvas.height - ((totalPagesCount - 1) * pageHeightPx);
+        if (lastPageH < 30) {
+          totalPagesCount -= 1;
+        }
+      }
 
       for (let p = 0; p < totalPagesCount; p++) {
         if (p > 0) pdf.addPage();
@@ -495,27 +1081,37 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {/* Custom Print / PDF Options Modal Button (Primary Action) */}
+          <button
+            onClick={() => setIsPrintConfigModalOpen(true)}
+            className="px-3.5 py-2 rounded-xl text-xs font-semibold shadow-lg bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/30 hover:shadow-emerald-500/40 border border-emerald-400/40 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+            title="ตั้งค่าขอบเขตแปลงที่ดินและเลือกหมวดหมู่รายงานที่ต้องการพิมพ์ หรือเปิดดูเป็น PDF"
+          >
+            <Sliders className="w-4 h-4 text-emerald-100" />
+            <span>ตัวเลือกพิมพ์ / PDF (Custom Print)</span>
+          </button>
+
           {/* Download Report PDF Button (Primary Action using jsPDF) */}
           <button
             onClick={() => handleDownloadPdf('download')}
             disabled={isGeneratingPdf}
-            className={`px-3.5 py-2 rounded-xl text-xs font-semibold shadow-lg flex items-center gap-1.5 transition-all cursor-pointer active:scale-95 ${
+            className={`px-3 py-2 rounded-xl text-xs font-medium shadow flex items-center gap-1.5 transition-all cursor-pointer active:scale-95 ${
               isGeneratingPdf 
-                ? 'bg-emerald-800 text-emerald-200 cursor-wait shadow-emerald-900/40' 
-                : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/30 hover:shadow-emerald-500/40 border border-emerald-400/30'
+                ? 'bg-slate-800 text-slate-400 cursor-wait' 
+                : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
             }`}
-            title="ดาวน์โหลดรายงานสรุปพอร์ตโฟลิโอเป็นไฟล์เอกสาร PDF ด้วย jsPDF บันทึกเก็บไว้ในเครื่อง"
+            title="ดาวน์โหลดรายงานสรุปพอร์ตโฟลิโอเป็นไฟล์เอกสาร PDF ด้วย jsPDF บันทึกเก็บไว้ในเครื่องทันที"
             aria-label="Download Report PDF"
           >
             {isGeneratingPdf ? (
               <>
-                <Loader2 className="w-4 h-4 animate-spin text-white" />
-                <span>กำลังดาวน์โหลด PDF...</span>
+                <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
+                <span>กำลังสร้าง PDF...</span>
               </>
             ) : (
               <>
-                <Download className="w-4 h-4 text-white" />
-                <span>ดาวน์โหลดรายงาน PDF (Download PDF)</span>
+                <Download className="w-4 h-4 text-emerald-400" />
+                <span>ดาวน์โหลด PDF</span>
               </>
             )}
           </button>
@@ -527,19 +1123,19 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
             title="เปิดดูตัวอย่างเอกสารรายงาน PDF ในแท็บใหม่ทันที"
           >
-            <Eye className="w-4 h-4 text-emerald-400" />
+            <Eye className="w-4 h-4 text-teal-400" />
             <span className="hidden sm:inline">เปิดดู</span> PDF
           </button>
 
           {/* Print Report Dialog */}
           <button
             onClick={handlePrint}
-            className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95 text-white border border-slate-600 hover:border-emerald-500/60 text-xs font-semibold flex items-center gap-1.5 shadow-md shadow-slate-900/30 transition-all cursor-pointer"
+            className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95 text-white border border-slate-600 hover:border-emerald-500/60 text-xs font-semibold flex items-center gap-1.5 shadow-md shadow-slate-900/30 transition-all cursor-pointer"
             title="พิมพ์รายงาน (Print) สรุปผลกำไร-ขาดทุน และตารางวิเคราะห์ทั้งหมดผ่านหน้าต่างเบราว์เซอร์"
             aria-label="Print Report"
           >
             <Printer className="w-4 h-4 text-emerald-400" />
-            <span>พิมพ์รายงาน (Print)</span>
+            <span>พิมพ์รายงาน</span>
           </button>
 
           {/* Export Report CSV */}
@@ -723,7 +1319,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         </div>
 
         {/* Top 4 KPI Highlight Cards for Selected Report Period */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 ${!reportSections.executiveSummary ? 'print:hidden' : ''}`}>
           {/* Card 1: Total Cost */}
           <div className={`p-5 rounded-xl border ${
             paperPrintMode
@@ -808,6 +1404,16 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         {/* Report Section Tabs */}
         <div className={`flex border-b space-x-4 print:hidden no-print management-control ${paperPrintMode ? 'border-slate-300' : 'border-slate-800'}`}>
           <button
+            onClick={() => setReportSubTab('forecast')}
+            className={`py-2 px-1 text-xs sm:text-sm font-semibold border-b-2 transition-colors cursor-pointer flex items-center gap-1.5 ${
+              reportSubTab === 'forecast'
+                ? paperPrintMode ? 'border-slate-950 text-slate-950 font-bold' : 'border-emerald-500 text-emerald-400'
+                : paperPrintMode ? 'border-transparent text-slate-600 hover:text-slate-900' : 'border-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            📈 กราฟ D3 เป้ารายได้ vs ยอดขายจริง
+          </button>
+          <button
             onClick={() => setReportSubTab('landType')}
             className={`py-2 px-1 text-xs sm:text-sm font-semibold border-b-2 transition-colors cursor-pointer ${
               reportSubTab === 'landType'
@@ -825,7 +1431,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 : paperPrintMode ? 'border-transparent text-slate-600 hover:text-slate-900' : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
           >
-            📈 แนวโน้มการลงทุนและผลตอบแทนย้อนหลัง (Historical Trend)
+            📅 แนวโน้มการลงทุนและผลตอบแทนย้อนหลัง (Historical Trend)
           </button>
           <button
             onClick={() => setReportSubTab('performance')}
@@ -839,8 +1445,17 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           </button>
         </div>
 
+        {/* Sub-view 0: D3 Revenue Forecast vs Realized Line Chart */}
+        <div className={`space-y-6 ${reportSubTab === 'forecast' || (isGeneratingPdf && reportSections.d3Chart) ? 'block' : 'hidden print:block avoid-break'} ${!reportSections.d3Chart ? 'print:hidden' : ''}`}>
+          <RevenueForecastVsRealizedChart
+            plots={activeReportPlots}
+            paperPrintMode={paperPrintMode}
+            onSelectPlot={onSelectPlot}
+          />
+        </div>
+
         {/* Sub-view 1: Report Grouped By Land Type */}
-        <div className={`space-y-6 ${reportSubTab === 'landType' || isGeneratingPdf ? 'block' : 'hidden print:block avoid-break'}`}>
+        <div className={`space-y-6 ${reportSubTab === 'landType' || (isGeneratingPdf && reportSections.landType) ? 'block' : 'hidden print:block avoid-break'} ${!reportSections.landType ? 'print:hidden' : ''}`}>
           {/* Visual Profit Comparison Across Land Types */}
           <div className={`p-5 rounded-xl border space-y-4 shadow-sm ${
             paperPrintMode
@@ -1047,7 +1662,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         </div>
 
         {/* Sub-view 2: Report Grouped By Time Period (Historical Trend) */}
-        <div className={`space-y-6 ${reportSubTab === 'timeline' || isGeneratingPdf ? 'block' : 'hidden print:block page-break-before avoid-break'}`}>
+        <div className={`space-y-6 ${reportSubTab === 'timeline' || (isGeneratingPdf && reportSections.timeline) ? 'block' : 'hidden print:block avoid-break'} ${!reportSections.timeline ? 'print:hidden' : ''}`}>
           {/* Historical Investment Timeline Chart */}
           <div className={`p-5 rounded-xl border space-y-4 shadow-sm ${
             paperPrintMode
@@ -1221,7 +1836,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         </div>
 
         {/* Sub-view 3: Performance Ranking & Matrix */}
-        <div className={`space-y-6 ${reportSubTab === 'performance' || isGeneratingPdf ? 'block' : 'hidden print:block page-break-before avoid-break'}`}>
+        <div className={`space-y-6 ${reportSubTab === 'performance' || (isGeneratingPdf && reportSections.performance) ? 'block' : 'hidden print:block avoid-break'} ${!reportSections.performance ? 'print:hidden' : ''}`}>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Top Return on Investment (ROI %) Plots */}
             <div className={`p-5 rounded-xl border space-y-3 shadow-sm ${
@@ -1234,7 +1849,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 แปลงที่มีอัตราผลตอบแทนคาดหวังสูงสุด (% ROI)
               </h3>
               <div className={`divide-y ${paperPrintMode ? 'divide-slate-200' : 'divide-slate-800/80'}`}>
-                {[...filteredPlots]
+                {[...activeReportPlots]
                   .sort((a, b) => {
                     const gainA = (a.targetSalePrice || 0) > 0 ? (a.targetSalePrice - a.totalCost) / (a.totalCost || 1) : 0;
                     const gainB = (b.targetSalePrice || 0) > 0 ? (b.targetSalePrice - b.totalCost) / (b.totalCost || 1) : 0;
@@ -1288,7 +1903,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 แปลงที่ใช้เงินลงทุนสูงสุด (Capital Exposure)
               </h3>
               <div className={`divide-y ${paperPrintMode ? 'divide-slate-200' : 'divide-slate-800/80'}`}>
-                {[...filteredPlots]
+                {[...activeReportPlots]
                   .sort((a, b) => (b.totalCost || 0) - (a.totalCost || 0))
                   .slice(0, 5)
                   .map((p) => {
@@ -1329,7 +1944,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         </div>
 
         {/* Strategic Report Takeaways & Insights */}
-        <div className={`p-5 rounded-xl border space-y-3 avoid-break ${
+        <div className={`p-5 rounded-xl border space-y-3 avoid-break ${!reportSections.insights ? 'print:hidden' : ''} ${
           paperPrintMode
             ? 'bg-slate-50 border-2 border-slate-300 text-slate-800'
             : 'bg-gradient-to-r from-slate-900 via-slate-950 to-slate-900 border-slate-800 text-slate-300'
@@ -1394,6 +2009,463 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           <span>{pdfSuccessToast}</span>
         </div>
       )}
+
+      {/* ============================================================== */}
+      {/* Print & PDF Configuration Modal (Selectable Sections & Plots)   */}
+      {/* ============================================================== */}
+      {isPrintConfigModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 animate-fade-in print:hidden">
+          <div 
+            className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-2xl w-full max-h-[92vh] flex flex-col shadow-2xl overflow-hidden"
+            role="dialog"
+            aria-modal="true"
+          >
+            {/* Modal Header */}
+            <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/60">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
+                  <Sliders className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white flex items-center gap-2">
+                    ตัวเลือกการพิมพ์และออกรายงาน PDF
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    ปรับแต่งขอบเขตแปลงที่ดินและเลือกหมวดหมู่ที่ต้องการพิมพ์ได้อย่างอิสระ
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsPrintConfigModalOpen(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                title="ปิดหน้าต่าง"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body (Scrollable) */}
+            <div className="p-5 overflow-y-auto space-y-5 text-xs text-slate-200">
+              {/* Section 1: Plot Scope */}
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-slate-100 flex items-center gap-1.5 text-sm">
+                    <span className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-xs font-bold">1</span>
+                    ขอบเขตแปลงที่ดินในรายงาน:
+                  </span>
+                  <span className="text-[11px] text-slate-400 font-mono">
+                    กำลังเลือก: {activeReportPlots.length} แปลง
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <label 
+                    onClick={() => setReportPlotScope('filtered')}
+                    className={`p-3 rounded-xl border cursor-pointer transition-all flex flex-col justify-between ${
+                      reportPlotScope === 'filtered'
+                        ? 'bg-emerald-950/40 border-emerald-500 text-emerald-200 shadow-sm'
+                        : 'bg-slate-800/60 border-slate-700/80 text-slate-300 hover:bg-slate-800'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold">ตามตัวกรองปัจจุบัน</span>
+                      <input 
+                        type="radio" 
+                        name="plotScope" 
+                        checked={reportPlotScope === 'filtered'} 
+                        onChange={() => setReportPlotScope('filtered')}
+                        className="text-emerald-500 focus:ring-0" 
+                      />
+                    </div>
+                    <span className="text-[11px] text-slate-400 mt-1">
+                      {filteredPlots.length} แปลง (ปี/ประเภทที่เลือก)
+                    </span>
+                  </label>
+
+                  <label 
+                    onClick={() => setReportPlotScope('all')}
+                    className={`p-3 rounded-xl border cursor-pointer transition-all flex flex-col justify-between ${
+                      reportPlotScope === 'all'
+                        ? 'bg-emerald-950/40 border-emerald-500 text-emerald-200 shadow-sm'
+                        : 'bg-slate-800/60 border-slate-700/80 text-slate-300 hover:bg-slate-800'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold">แปลงทั้งหมดในพอร์ต</span>
+                      <input 
+                        type="radio" 
+                        name="plotScope" 
+                        checked={reportPlotScope === 'all'} 
+                        onChange={() => setReportPlotScope('all')}
+                        className="text-emerald-500 focus:ring-0" 
+                      />
+                    </div>
+                    <span className="text-[11px] text-slate-400 mt-1">
+                      ครบทั้ง {plots.length} แปลง
+                    </span>
+                  </label>
+
+                  <label 
+                    onClick={() => setReportPlotScope('selected')}
+                    className={`p-3 rounded-xl border cursor-pointer transition-all flex flex-col justify-between ${
+                      reportPlotScope === 'selected'
+                        ? 'bg-emerald-950/40 border-emerald-500 text-emerald-200 shadow-sm'
+                        : 'bg-slate-800/60 border-slate-700/80 text-slate-300 hover:bg-slate-800'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold">เลือกแปลงเฉพาะเจาะจง</span>
+                      <input 
+                        type="radio" 
+                        name="plotScope" 
+                        checked={reportPlotScope === 'selected'} 
+                        onChange={() => setReportPlotScope('selected')}
+                        className="text-emerald-500 focus:ring-0" 
+                      />
+                    </div>
+                    <span className="text-[11px] text-slate-400 mt-1">
+                      {selectedReportPlotIds.length} แปลงที่เลือก
+                    </span>
+                  </label>
+                </div>
+
+                {/* Checklist when custom selection is active */}
+                {reportPlotScope === 'selected' && (
+                  <div className="mt-2 p-3 rounded-xl border border-slate-700 bg-slate-950/80 space-y-2 animate-fade-in">
+                    <div className="flex items-center justify-between pb-1 border-b border-slate-800 text-[11px]">
+                      <span className="text-slate-400 font-medium">
+                        คลิกติ๊กถูกเพื่อเลือกแปลงที่ต้องการให้อยู่ในรายงาน:
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedReportPlotIds(plots.map((p) => p.id))}
+                          className="text-emerald-400 hover:underline cursor-pointer font-semibold"
+                        >
+                          เลือกทั้งหมด ({plots.length})
+                        </button>
+                        <span>•</span>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedReportPlotIds([])}
+                          className="text-slate-400 hover:text-rose-400 hover:underline cursor-pointer"
+                        >
+                          ล้างการเลือก
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="max-h-40 overflow-y-auto divide-y divide-slate-800/80 pr-1">
+                      {plots.map((p) => {
+                        const isChecked = selectedReportPlotIds.includes(p.id);
+                        return (
+                          <label
+                            key={p.id}
+                            className={`flex items-center justify-between py-2 px-1.5 rounded cursor-pointer transition-colors ${
+                              isChecked ? 'bg-slate-800/40' : 'hover:bg-slate-900'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2.5">
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedReportPlotIds([...selectedReportPlotIds, p.id]);
+                                  } else {
+                                    setSelectedReportPlotIds(selectedReportPlotIds.filter((id) => id !== p.id));
+                                  }
+                                }}
+                                className="rounded text-emerald-500 focus:ring-0 cursor-pointer"
+                              />
+                              <div>
+                                <span className="font-bold text-slate-100">
+                                  #{p.orderNumber} {p.title}
+                                </span>
+                                <span className="text-[10px] text-slate-400 ml-2">
+                                  {p.province} • {p.landType || 'ที่ดิน'}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="text-right font-mono text-[11px]">
+                              <span className="text-slate-300">{formatCurrency(p.totalCost)}</span>
+                              <span className={`ml-2 text-[10px] px-1.5 py-0.2 rounded ${
+                                p.status === 'sold' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-400'
+                              }`}>
+                                {p.status === 'sold' ? 'ขายแล้ว' : 'ถือครอง'}
+                              </span>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Section 2: Report Sections Selection */}
+              <div className="space-y-2.5 pt-2 border-t border-slate-800">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-slate-100 flex items-center gap-1.5 text-sm">
+                    <span className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-xs font-bold">2</span>
+                    เลือกหมวดหมู่ที่ต้องการให้อยู่ในเอกสาร (Report Sections):
+                  </span>
+                  
+                  {/* Quick Presets */}
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setReportSections({
+                        executiveSummary: true,
+                        d3Chart: true,
+                        landType: true,
+                        timeline: true,
+                        performance: true,
+                        insights: true,
+                      })}
+                      className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-emerald-400 cursor-pointer"
+                    >
+                      เลือกทั้งหมด
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setReportSections({
+                        executiveSummary: true,
+                        d3Chart: true,
+                        landType: false,
+                        timeline: false,
+                        performance: false,
+                        insights: true,
+                      })}
+                      className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-sky-400 cursor-pointer"
+                    >
+                      เฉพาะสรุปผู้บริหาร & กราฟ
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setReportSections({
+                        executiveSummary: false,
+                        d3Chart: false,
+                        landType: true,
+                        timeline: true,
+                        performance: true,
+                        insights: false,
+                      })}
+                      className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-amber-400 cursor-pointer"
+                    >
+                      เฉพาะตารางตัวเลข
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <label className={`p-3 rounded-xl border flex items-start gap-3 cursor-pointer transition-colors ${
+                    reportSections.executiveSummary ? 'bg-slate-800/80 border-emerald-500/60' : 'bg-slate-900 border-slate-800 text-slate-400'
+                  }`}>
+                    <input
+                      type="checkbox"
+                      checked={reportSections.executiveSummary}
+                      onChange={(e) => setReportSections({ ...reportSections, executiveSummary: e.target.checked })}
+                      className="mt-0.5 rounded text-emerald-500 focus:ring-0 cursor-pointer"
+                    />
+                    <div>
+                      <div className="font-bold text-slate-100">1. สรุปภาพรวมผู้บริหาร & บัตรตัวชี้วัด 4 มิติ</div>
+                      <div className="text-[11px] text-slate-400">เงินลงทุนรวม, กำไรจริง, กำไรคาดหวัง และ % ROI</div>
+                    </div>
+                  </label>
+
+                  <label className={`p-3 rounded-xl border flex items-start gap-3 cursor-pointer transition-colors ${
+                    reportSections.d3Chart ? 'bg-slate-800/80 border-emerald-500/60' : 'bg-slate-900 border-slate-800 text-slate-400'
+                  }`}>
+                    <input
+                      type="checkbox"
+                      checked={reportSections.d3Chart}
+                      onChange={(e) => setReportSections({ ...reportSections, d3Chart: e.target.checked })}
+                      className="mt-0.5 rounded text-emerald-500 focus:ring-0 cursor-pointer"
+                    />
+                    <div>
+                      <div className="font-bold text-slate-100 flex items-center gap-1.5">
+                        <span>2. กราฟ D3 เป้ารายได้ vs ยอดขายจริง</span>
+                        <span className="text-[9px] px-1 rounded bg-emerald-500/20 text-emerald-300 font-mono">D3 Live</span>
+                      </div>
+                      <div className="text-[11px] text-slate-400">เส้นเป้ารายได้สะสมเทียบยอดขายจริงที่รับรู้แล้ว</div>
+                    </div>
+                  </label>
+
+                  <label className={`p-3 rounded-xl border flex items-start gap-3 cursor-pointer transition-colors ${
+                    reportSections.landType ? 'bg-slate-800/80 border-emerald-500/60' : 'bg-slate-900 border-slate-800 text-slate-400'
+                  }`}>
+                    <input
+                      type="checkbox"
+                      checked={reportSections.landType}
+                      onChange={(e) => setReportSections({ ...reportSections, landType: e.target.checked })}
+                      className="mt-0.5 rounded text-emerald-500 focus:ring-0 cursor-pointer"
+                    />
+                    <div>
+                      <div className="font-bold text-slate-100">3. สรุปผลกำไรตามประเภทที่ดิน & ตาราง</div>
+                      <div className="text-[11px] text-slate-400">การกระจายตัวของเงินทุนและกำไรตามประเภท</div>
+                    </div>
+                  </label>
+
+                  <label className={`p-3 rounded-xl border flex items-start gap-3 cursor-pointer transition-colors ${
+                    reportSections.timeline ? 'bg-slate-800/80 border-emerald-500/60' : 'bg-slate-900 border-slate-800 text-slate-400'
+                  }`}>
+                    <input
+                      type="checkbox"
+                      checked={reportSections.timeline}
+                      onChange={(e) => setReportSections({ ...reportSections, timeline: e.target.checked })}
+                      className="mt-0.5 rounded text-emerald-500 focus:ring-0 cursor-pointer"
+                    />
+                    <div>
+                      <div className="font-bold text-slate-100">4. แนวโน้มการลงทุนย้อนหลังตามปี พ.ศ.</div>
+                      <div className="text-[11px] text-slate-400">ตารางและไทม์ไลน์เปรียบเทียบผลตอบแทนรายปี</div>
+                    </div>
+                  </label>
+
+                  <label className={`p-3 rounded-xl border flex items-start gap-3 cursor-pointer transition-colors ${
+                    reportSections.performance ? 'bg-slate-800/80 border-emerald-500/60' : 'bg-slate-900 border-slate-800 text-slate-400'
+                  }`}>
+                    <input
+                      type="checkbox"
+                      checked={reportSections.performance}
+                      onChange={(e) => setReportSections({ ...reportSections, performance: e.target.checked })}
+                      className="mt-0.5 rounded text-emerald-500 focus:ring-0 cursor-pointer"
+                    />
+                    <div>
+                      <div className="font-bold text-slate-100">5. ลำดับแปลงกำไรสูงสุด & แปลงเงินลงทุนสูงสุด</div>
+                      <div className="text-[11px] text-slate-400">Top Return on Investment (ROI) & Capital Exposure</div>
+                    </div>
+                  </label>
+
+                  <label className={`p-3 rounded-xl border flex items-start gap-3 cursor-pointer transition-colors ${
+                    reportSections.insights ? 'bg-slate-800/80 border-emerald-500/60' : 'bg-slate-900 border-slate-800 text-slate-400'
+                  }`}>
+                    <input
+                      type="checkbox"
+                      checked={reportSections.insights}
+                      onChange={(e) => setReportSections({ ...reportSections, insights: e.target.checked })}
+                      className="mt-0.5 rounded text-emerald-500 focus:ring-0 cursor-pointer"
+                    />
+                    <div>
+                      <div className="font-bold text-slate-100">6. บทวิเคราะห์เชิงกลยุทธ์ & ช่องลงนาม</div>
+                      <div className="text-[11px] text-slate-400">Strategic Insights และการรับรองรายงาน</div>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              {/* Section 3: Print Format / Paper Mode */}
+              <div className="space-y-2 pt-2 border-t border-slate-800">
+                <span className="font-bold text-slate-100 flex items-center gap-1.5 text-sm">
+                  <span className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-xs font-bold">3</span>
+                  รูปแบบการแสดงผลของรายงาน (Print Style):
+                </span>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <label 
+                    onClick={() => setPaperPrintMode(true)}
+                    className={`p-3 rounded-xl border cursor-pointer flex items-center justify-between ${
+                      paperPrintMode ? 'bg-white text-slate-950 border-2 border-emerald-500 font-bold' : 'bg-slate-800/60 border-slate-700 text-slate-300'
+                    }`}
+                  >
+                    <div>
+                      <span className="text-xs">📄 ขาวดำ-ประหยัดหมึก (Monochrome)</span>
+                      <p className={`text-[10px] mt-0.5 ${paperPrintMode ? 'text-slate-700' : 'text-slate-400'}`}>
+                        ตัวหนังสือดำ คมชัด ประหยัดหมึกพิมพ์
+                      </p>
+                    </div>
+                    <input 
+                      type="radio" 
+                      name="modalPaperMode" 
+                      checked={paperPrintMode} 
+                      onChange={() => setPaperPrintMode(true)} 
+                      className="text-emerald-600 focus:ring-0" 
+                    />
+                  </label>
+
+                  <label 
+                    onClick={() => setPaperPrintMode(false)}
+                    className={`p-3 rounded-xl border cursor-pointer flex items-center justify-between ${
+                      !paperPrintMode ? 'bg-emerald-950/40 border-2 border-emerald-500 text-emerald-200 font-bold' : 'bg-slate-800/60 border-slate-700 text-slate-300'
+                    }`}
+                  >
+                    <div>
+                      <span className="text-xs">🎨 โหมดสีหน้าจอ (Color Digital)</span>
+                      <p className="text-[10px] text-slate-400 mt-0.5">
+                        สีสันกราฟและชาร์ตตามธีมหน้าจอ
+                      </p>
+                    </div>
+                    <input 
+                      type="radio" 
+                      name="modalPaperMode" 
+                      checked={!paperPrintMode} 
+                      onChange={() => setPaperPrintMode(false)} 
+                      className="text-emerald-600 focus:ring-0" 
+                    />
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer with Direct Actions */}
+            <div className="px-5 py-4 border-t border-slate-800 bg-slate-950/80 flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="text-[11px] text-slate-400 flex items-center gap-1.5">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                <span>พร้อมพิมพ์สำหรับ: <strong>{activeReportPlots.length} แปลง</strong></span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
+                <button
+                  type="button"
+                  onClick={() => setIsPrintConfigModalOpen(false)}
+                  className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium cursor-pointer transition-colors"
+                >
+                  ปิด
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsPrintConfigModalOpen(false);
+                    handleDownloadPdf('open');
+                  }}
+                  className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-teal-300 border border-teal-500/30 text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-all active:scale-95"
+                  title="เปิดดู PDF ตัวอย่างในแท็บใหม่ทันที"
+                >
+                  <Eye className="w-4 h-4 text-teal-400" />
+                  <span>เปิดดู PDF</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsPrintConfigModalOpen(false);
+                    handleDownloadPdf('download');
+                  }}
+                  className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-500/40 text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-all active:scale-95"
+                  title="ดาวน์โหลดเป็นไฟล์ PDF"
+                >
+                  <Download className="w-4 h-4 text-emerald-400" />
+                  <span>ดาวน์โหลด PDF</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsPrintConfigModalOpen(false);
+                    handlePrint();
+                  }}
+                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-lg shadow-emerald-950/40 border border-emerald-400/40 flex items-center gap-1.5 cursor-pointer transition-all active:scale-95"
+                  title="สั่งพิมพ์รายงานผ่านหน้าต่างการพิมพ์ของเบราว์เซอร์"
+                >
+                  <Printer className="w-4 h-4 text-white" />
+                  <span>พิมพ์รายงาน (Print)</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
-);
+  );
 };

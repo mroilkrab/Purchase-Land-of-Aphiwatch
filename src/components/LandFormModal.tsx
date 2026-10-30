@@ -21,12 +21,15 @@ import {
   RefreshCw,
   Scale,
   ShieldCheck,
-  Receipt
+  Receipt,
+  Camera
 } from 'lucide-react';
 import { LandPlot, SubParcel, LandPlotImage, LandStatus, LandTaxUsageType } from '../types/land';
 import { formatThaiArea, formatCurrency } from '../services/storage';
 import { compressImageForStorage } from '../services/dbStorage';
 import { calculateLandTax, inferDefaultTaxUsage, TAX_USAGE_CONFIGS } from '../services/landTax';
+import { SnapDeedCameraModal } from './SnapDeedCameraModal';
+import { triggerPrint } from '../utils/print';
 
 interface LandFormModalProps {
   isOpen: boolean;
@@ -62,6 +65,7 @@ export const LandFormModal: React.FC<LandFormModalProps> = ({
 }) => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [autoSyncSheet, setAutoSyncSheet] = useState<boolean>(true);
+  const [isSnapCameraOpen, setIsSnapCameraOpen] = useState(false);
 
   const getInitialFormData = (data?: LandPlot | null, nextOrder: number = 1): Partial<LandPlot> => {
     if (data) {
@@ -286,6 +290,21 @@ export const LandFormModal: React.FC<LandFormModalProps> = ({
     }));
   };
 
+  const handleSnapDeedCapture = (base64Url: string, title: string) => {
+    const newImage: LandPlotImage = {
+      id: `img-snap-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      url: base64Url,
+      title: title || (formData.primaryDeedNumber ? `โฉนด ${formData.primaryDeedNumber}` : `รูปถ่ายโฉนด (${new Date().toLocaleDateString('th-TH')})`),
+      type: 'deed',
+      category: 'deed',
+      uploadedAt: new Date().toISOString(),
+    };
+    setFormData((prev) => ({
+      ...prev,
+      images: [...(prev.images || []), newImage],
+    }));
+  };
+
   // Live Land and Building Tax Calculation for this plot
   const liveTaxResult = useMemo(() => {
     const appraisal = Number(formData.appraisalPrice) > 0 
@@ -335,8 +354,8 @@ export const LandFormModal: React.FC<LandFormModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm overflow-y-auto">
-      <div className="relative w-full max-w-4xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden my-8 max-h-[90vh] flex flex-col">
+    <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm overflow-y-auto print:static print:p-0 print:bg-transparent print:z-auto print:block">
+      <div className="relative w-full max-w-4xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden my-8 max-h-[90vh] flex flex-col print:hidden">
         {/* Modal Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-800/60 sticky top-0 z-20">
           <div className="flex items-center gap-2">
@@ -345,12 +364,23 @@ export const LandFormModal: React.FC<LandFormModalProps> = ({
               {initialData ? `แก้ไขแปลงที่ดิน #${formData.orderNumber}: ${formData.title}` : 'เพิ่มแปลงที่ดินใหม่ในพอร์ต'}
             </h2>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-700/60 rounded-lg transition-colors cursor-pointer"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => triggerPrint('portrait')}
+              className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-400/30 text-xs font-semibold flex items-center gap-1.5 shadow-md shadow-indigo-600/25 transition-all cursor-pointer"
+              title="พิมพ์รายงานสรุปข้อมูลแปลงที่ดินนี้ (A4 PDF / Print)"
+            >
+              <Printer className="w-3.5 h-3.5 text-white" />
+              <span>พิมพ์รายงาน</span>
+            </button>
+            <button
+              onClick={onClose}
+              className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-700/60 rounded-lg transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Form Body */}
@@ -1087,23 +1117,43 @@ export const LandFormModal: React.FC<LandFormModalProps> = ({
             </div>
           </div>
 
-          {/* Section 5: Photo Upload & Attachments */}
+          {/* Section 5: Photo Upload & Snap Deed Camera */}
           <div className="space-y-4 pt-4 border-t border-slate-800">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-teal-400 flex items-center gap-2">
-                <ImageIcon className="w-4 h-4" /> 5. อัพโหลดรูปภาพโฉนด / รูปแปลงที่ดินจริง
-              </h3>
-              <label className="px-3 py-1.5 rounded-lg bg-teal-500/15 hover:bg-teal-500/25 text-teal-300 border border-teal-500/30 text-xs font-medium flex items-center gap-1.5 cursor-pointer transition-colors">
-                <Upload className="w-3.5 h-3.5" />
-                <span>เลือกรูปภาพอัพโหลด</span>
-                <input
-                  type="file"
-                  multiple
-                  accept="image/*"
-                  onChange={handleImageUpload}
-                  className="hidden"
-                />
-              </label>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+              <div>
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-teal-400 flex items-center gap-2">
+                  <ImageIcon className="w-4 h-4" /> 5. รูปภาพโฉนดที่ดิน / เอกสารสิทธิ์ / รูปแปลงจริง
+                </h3>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  ถ่ายรูปโฉนดด้วยกล้องอุปกรณ์ (Snap Deed) หรืออัพโหลดรูปภาพ บันทึกเป็น Base64 โดยตรง
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {/* Snap Deed Camera Button */}
+                <button
+                  type="button"
+                  onClick={() => setIsSnapCameraOpen(true)}
+                  className="px-3 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm shadow-emerald-950/40 hover:scale-[1.02] cursor-pointer"
+                  title="เปิดกล้องอุปกรณ์ถ่ายภาพโฉนดที่ดินทันที"
+                >
+                  <Camera className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>ถ่ายรูปโฉนด (Snap Deed)</span>
+                </button>
+
+                {/* Upload Image Button */}
+                <label className="px-3 py-1.5 rounded-lg bg-teal-500/15 hover:bg-teal-500/25 text-teal-300 border border-teal-500/30 text-xs font-medium flex items-center gap-1.5 cursor-pointer transition-colors">
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>เลือกไฟล์รูปภาพ</span>
+                  <input
+                    type="file"
+                    multiple
+                    accept="image/*"
+                    onChange={handleImageUpload}
+                    className="hidden"
+                  />
+                </label>
+              </div>
             </div>
 
             {/* Uploaded Images Preview Gallery */}
@@ -1112,19 +1162,25 @@ export const LandFormModal: React.FC<LandFormModalProps> = ({
                 {formData.images.map((img) => (
                   <div
                     key={img.id}
-                    className="group relative rounded-xl overflow-hidden border border-slate-700 bg-slate-800 aspect-video"
+                    className="group relative rounded-xl overflow-hidden border border-slate-700 bg-slate-800 aspect-video shadow-md"
                   >
                     <img
                       src={img.url}
                       alt={img.title}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                     />
-                    <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-transparent flex items-end justify-between p-2">
-                      <span className="text-[10px] text-slate-200 truncate max-w-[80%]">{img.title}</span>
+                    <div className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-transparent to-transparent flex items-end justify-between p-2">
+                      <div className="truncate max-w-[80%]">
+                        <span className="text-[10px] text-slate-100 font-medium block truncate">{img.title}</span>
+                        <span className="text-[9px] text-emerald-400 flex items-center gap-1">
+                          {img.type === 'deed' ? 'โฉนดที่ดิน (Snap/Deed)' : 'รูปถ่ายทั่วไป'}
+                        </span>
+                      </div>
                       <button
                         type="button"
                         onClick={() => handleImageDelete(img.id)}
-                        className="p-1 text-slate-400 hover:text-rose-400 bg-slate-900/80 rounded transition-colors"
+                        className="p-1 text-slate-400 hover:text-rose-400 bg-slate-900/90 rounded transition-colors"
+                        title="ลบรูปภาพนี้"
                       >
                         <Trash2 className="w-3 h-3" />
                       </button>
@@ -1133,8 +1189,18 @@ export const LandFormModal: React.FC<LandFormModalProps> = ({
                 ))}
               </div>
             ) : (
-              <div className="p-6 text-center border border-dashed border-slate-800 rounded-xl text-slate-500 text-xs">
-                ยังไม่มีรูปภาพที่อัพโหลด (รองรับรูปภาพโฉนด น.ส.4จ, รูปถ่ายระวาง, แผนที่ดาวเทียม, สัญญาจะซื้อจะขาย)
+              <div className="p-6 text-center border border-dashed border-slate-800 rounded-xl text-slate-500 text-xs flex flex-col items-center justify-center gap-2.5 bg-slate-900/40">
+                <p>ยังไม่มีรูปภาพที่อัพโหลด (รองรับรูปภาพโฉนด น.ส.4จ, รูปถ่ายระวาง, แผนที่ดาวเทียม, สัญญาจะซื้อจะขาย)</p>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsSnapCameraOpen(true)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs text-emerald-300 bg-emerald-950/60 hover:bg-emerald-900/60 border border-emerald-500/40 rounded-lg transition-colors font-medium"
+                  >
+                    <Camera className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>กดถ่ายรูปโฉนดด้วยกล้อง (Snap Deed)</span>
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -1194,12 +1260,12 @@ export const LandFormModal: React.FC<LandFormModalProps> = ({
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => window.print()}
-                className="hidden sm:inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs sm:text-sm font-medium transition-colors cursor-pointer"
-                title="พิมพ์ใบสรุปข้อมูลแปลงที่ดินนี้ (A4)"
+                onClick={() => triggerPrint('portrait')}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 hover:text-white border border-indigo-500/30 text-xs sm:text-sm font-semibold transition-colors cursor-pointer"
+                title="พิมพ์รายงานสรุปข้อมูลแปลงที่ดินนี้ (A4 PDF / Print)"
               >
-                <Printer className="w-4 h-4 text-emerald-400" />
-                <span>พิมพ์ใบสรุป</span>
+                <Printer className="w-4 h-4 text-indigo-400" />
+                <span>พิมพ์รายงาน</span>
               </button>
               <button
                 type="button"
@@ -1218,6 +1284,227 @@ export const LandFormModal: React.FC<LandFormModalProps> = ({
             </div>
           </div>
         </form>
+
+        {/* Snap Deed Camera Scanner Modal */}
+        <SnapDeedCameraModal
+          isOpen={isSnapCameraOpen}
+          onClose={() => setIsSnapCameraOpen(false)}
+          onCapture={handleSnapDeedCapture}
+          deedNumber={formData.primaryDeedNumber}
+          defaultTitle={formData.primaryDeedNumber ? `โฉนดที่ดิน เลขที่ ${formData.primaryDeedNumber}` : ''}
+        />
+      </div>
+
+      {/* Printable Land Plot Form Summary Sheet (A4 PDF) */}
+      <div id="printable-land-form-summary" className="hidden print:block text-black bg-white p-6 max-w-full">
+        {(() => {
+          const raiVal = Number(formData.rai) || 0;
+          const nganVal = Number(formData.ngan) || 0;
+          const sqWahVal = Number(formData.sqWah) || 0;
+          const totalSqWahCalc = Number(formData.totalSqWah) || (raiVal * 400 + nganVal * 100 + sqWahVal);
+          const pPrice = Number(formData.purchasePrice) || 0;
+          const tFees = Number(formData.taxAndFees) || 0;
+          const sCost = Number(formData.surveyCost) || 0;
+          const oExp = Number(formData.otherExpenses) || 0;
+          const totalCostCalc = Number(formData.totalCost) || (pPrice + tFees + sCost + oExp);
+          const costPerSqWahCalc = totalSqWahCalc > 0 ? Math.round(totalCostCalc / totalSqWahCalc) : 0;
+          const statusStr = formData.status || 'holding';
+          const targetPrice = Number(formData.targetSalePrice) || 0;
+          const usageType = formData.taxUsageType || 'vacant';
+          const usageInfo = TAX_USAGE_CONFIGS[usageType] || TAX_USAGE_CONFIGS.vacant;
+          const appraisalVal = Number(formData.appraisalPrice) || 0;
+
+          return (
+            <>
+              {/* Document Header */}
+              <div className="border-b-2 border-black pb-4 mb-4">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <span className="text-xs uppercase tracking-widest font-bold text-gray-600 block">
+                      LAND PORTFOLIO & TRADING LEDGER SYSTEM
+                    </span>
+                    <h1 className="text-xl font-bold text-black mt-0.5">
+                      ใบสรุปข้อมูลแปลงที่ดินและโครงสร้างต้นทุน (Land Plot Summary Sheet)
+                    </h1>
+                    <p className="text-xs text-gray-600 mt-1">
+                      แปลงลำดับที่ #{formData.orderNumber} : {formData.title || 'ไม่มีชื่อแปลง'}
+                    </p>
+                  </div>
+                  <div className="text-right text-xs text-gray-700">
+                    <div className="font-bold">วันที่พิมพ์: {new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })}</div>
+                    <div>เวลา: {new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })} น.</div>
+                    <div className="text-[10px] text-gray-500 mt-0.5 font-mono">STATUS: {statusStr.toUpperCase()}</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Section 1: General Info */}
+              <div className="mb-4">
+                <h2 className="text-xs font-bold uppercase tracking-wider bg-gray-100 p-1.5 border border-black mb-2 text-black">
+                  1. ข้อมูลทั่วไปและสถานที่ตั้ง
+                </h2>
+                <table className="w-full text-xs border-collapse border border-black mb-2">
+                  <tbody>
+                    <tr className="border-b border-black">
+                      <td className="p-2 font-bold bg-gray-50 border-r border-black w-36">ชื่อแปลงที่ดิน:</td>
+                      <td className="p-2 font-semibold">{formData.title || '-'}</td>
+                      <td className="p-2 font-bold bg-gray-50 border-x border-black w-36">สถานะการถือครอง:</td>
+                      <td className="p-2 font-semibold">
+                        {statusStr === 'sold' ? 'ขายแล้ว' : statusStr === 'consignment' ? 'รับขายฝาก' : statusStr === 'for_sale' ? 'กำลังประกาศขาย' : 'ถือครองเพื่อพัฒนา'}
+                      </td>
+                    </tr>
+                    <tr className="border-b border-black">
+                      <td className="p-2 font-bold bg-gray-50 border-r border-black">ประเภทกรรมสิทธิ์:</td>
+                      <td className="p-2">{formData.landType || '-'}</td>
+                      <td className="p-2 font-bold bg-gray-50 border-x border-black">วันที่เข้าซื้อ / โอน:</td>
+                      <td className="p-2 font-mono">{formData.purchaseDate || '-'}</td>
+                    </tr>
+                    <tr className="border-b border-black">
+                      <td className="p-2 font-bold bg-gray-50 border-r border-black">ทำเลที่ตั้ง:</td>
+                      <td className="p-2" colSpan={3}>
+                        ต.{formData.subdistrict || '-'} อ.{formData.district || '-'} จ.{formData.province || '-'}
+                      </td>
+                    </tr>
+                    <tr className="border-b border-black">
+                      <td className="p-2 font-bold bg-gray-50 border-r border-black">เลขที่โฉนดหลัก:</td>
+                      <td className="p-2 font-mono">{formData.primaryDeedNumber || '-'}</td>
+                      <td className="p-2 font-bold bg-gray-50 border-x border-black">เนื้อที่รวม:</td>
+                      <td className="p-2 font-bold">
+                        {formatThaiArea(raiVal, nganVal, sqWahVal)} ({totalSqWahCalc.toLocaleString('th-TH')} ตร.ว.)
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Section 2: Financial & Cost Breakdown */}
+              <div className="mb-4">
+                <h2 className="text-xs font-bold uppercase tracking-wider bg-gray-100 p-1.5 border border-black mb-2 text-black">
+                  2. โครงสร้างต้นทุนและการลงทุน (Investment & Cost Structure)
+                </h2>
+                <table className="w-full text-xs border-collapse border border-black">
+                  <thead>
+                    <tr className="bg-gray-200 border-b border-black">
+                      <th className="p-2 text-left font-bold border-r border-black">รายการต้นทุน / ค่าใช้จ่าย</th>
+                      <th className="p-2 text-right font-bold border-r border-black w-40">จำนวนเงิน (บาท)</th>
+                      <th className="p-2 text-right font-bold w-40">สัดส่วน (% ของต้นทุน)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-black/30">
+                    <tr>
+                      <td className="p-2 font-medium border-r border-black">ราคาซื้อที่ดิน (Purchase Price)</td>
+                      <td className="p-2 text-right font-mono border-r border-black">{pPrice.toLocaleString('th-TH')}</td>
+                      <td className="p-2 text-right font-mono text-gray-700">
+                        {totalCostCalc > 0 ? ((pPrice / totalCostCalc) * 100).toFixed(1) : 0}%
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="p-2 font-medium border-r border-black">ค่าธรรมเนียมการโอนและภาษี ณ กรมที่ดิน</td>
+                      <td className="p-2 text-right font-mono border-r border-black">{tFees.toLocaleString('th-TH')}</td>
+                      <td className="p-2 text-right font-mono text-gray-700">
+                        {totalCostCalc > 0 ? ((tFees / totalCostCalc) * 100).toFixed(1) : 0}%
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="p-2 font-medium border-r border-black">ค่ารังวัด แบ่งแยก และตรวจสอบแนวเขต</td>
+                      <td className="p-2 text-right font-mono border-r border-black">{sCost.toLocaleString('th-TH')}</td>
+                      <td className="p-2 text-right font-mono text-gray-700">
+                        {totalCostCalc > 0 ? ((sCost / totalCostCalc) * 100).toFixed(1) : 0}%
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="p-2 font-medium border-r border-black">ค่าใช้จ่ายอื่นๆ / พัฒนาที่ดิน / ปรับถม / กำแพง</td>
+                      <td className="p-2 text-right font-mono border-r border-black">{oExp.toLocaleString('th-TH')}</td>
+                      <td className="p-2 text-right font-mono text-gray-700">
+                        {totalCostCalc > 0 ? ((oExp / totalCostCalc) * 100).toFixed(1) : 0}%
+                      </td>
+                    </tr>
+                    <tr className="bg-gray-100 font-bold border-t-2 border-black text-black">
+                      <td className="p-2 border-r border-black">ต้นทุนรวมสุทธิทั้งสิ้น (Total Net Cost)</td>
+                      <td className="p-2 text-right font-mono border-r border-black text-sm">{totalCostCalc.toLocaleString('th-TH')} บาท</td>
+                      <td className="p-2 text-right font-mono">100.0%</td>
+                    </tr>
+                    <tr className="bg-gray-50">
+                      <td className="p-2 font-semibold border-r border-black">ต้นทุนเฉลี่ยต่อตารางวา</td>
+                      <td className="p-2 text-right font-mono font-bold border-r border-black">
+                        {costPerSqWahCalc.toLocaleString('th-TH')} บาท/ตร.ว.
+                      </td>
+                      <td className="p-2 text-right text-gray-500">-</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Section 3: Target & Valuation */}
+              <div className="mb-4">
+                <h2 className="text-xs font-bold uppercase tracking-wider bg-gray-100 p-1.5 border border-black mb-2 text-black">
+                  3. เป้าหมายการขายและการประเมินภาษีที่ดิน (Target & Tax Valuation)
+                </h2>
+                <div className="grid grid-cols-2 gap-4 text-xs">
+                  <div className="border border-black p-3 bg-gray-50">
+                    <div className="font-bold text-black mb-1">เป้าหมายการขาย (Sales KPI Target)</div>
+                    <div className="flex justify-between py-1 border-b border-gray-300">
+                      <span>ราคาตั้งขายเป้าหมาย:</span>
+                      <span className="font-bold font-mono">
+                        {targetPrice > 0 ? `${targetPrice.toLocaleString('th-TH')} บาท` : 'ยังไม่ได้ระบุ'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between py-1 border-b border-gray-300">
+                      <span>กำไรส่วนต่างคาดหวัง:</span>
+                      <span className="font-bold font-mono text-emerald-800">
+                        {targetPrice > totalCostCalc
+                          ? `+${(targetPrice - totalCostCalc).toLocaleString('th-TH')} บาท`
+                          : '-'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between py-1">
+                      <span>อัตราผลตอบแทนเป้าหมาย (ROI):</span>
+                      <span className="font-bold font-mono">
+                        {targetPrice > 0 && totalCostCalc > 0
+                          ? `${(((targetPrice - totalCostCalc) / totalCostCalc) * 100).toFixed(1)}%`
+                          : '-'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="border border-black p-3 bg-gray-50">
+                    <div className="font-bold text-black mb-1">ภาษีที่ดินและสิ่งปลูกสร้าง (ตาม พ.ร.บ.)</div>
+                    <div className="flex justify-between py-1 border-b border-gray-300">
+                      <span>ประเภทการใช้ประโยชน์:</span>
+                      <span className="font-medium">{usageInfo.title}</span>
+                    </div>
+                    <div className="flex justify-between py-1 border-b border-gray-300">
+                      <span>ราคาประเมินทุนทรัพย์ที่ดิน:</span>
+                      <span className="font-mono">
+                        {appraisalVal > 0 ? `${appraisalVal.toLocaleString('th-TH')} บาท` : 'ตามราคาซื้อ'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between py-1">
+                      <span>ประมาณการภาษีต่อปี:</span>
+                      <span className="font-bold font-mono">
+                        {liveTaxResult.annualTax.toLocaleString('th-TH')} บาท/ปี
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </>
+          );
+        })()}
+
+        {/* Signatures */}
+        <div className="pt-6 border-t border-gray-300 grid grid-cols-2 gap-8 text-center text-xs mt-6">
+          <div>
+            <div className="border-b border-black w-48 mx-auto mb-2 h-10"></div>
+            <div className="font-bold">เจ้าหน้าที่ผู้บันทึกข้อมูล</div>
+            <div className="text-gray-500 text-[10px]">วันที่: ....../....../......</div>
+          </div>
+          <div>
+            <div className="border-b border-black w-48 mx-auto mb-2 h-10"></div>
+            <div className="font-bold">ผู้ตรวจทาน / ผู้อนุมัติข้อมูล</div>
+            <div className="text-gray-500 text-[10px]">วันที่: ....../....../......</div>
+          </div>
+        </div>
       </div>
     </div>
   );

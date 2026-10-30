@@ -11,11 +11,13 @@ import {
   ArrowRight,
   Info,
   Receipt,
-  Scale
+  Scale,
+  Printer
 } from 'lucide-react';
 import { LandPlot, PortfolioSettings } from '../types/land';
 import { formatCurrency, formatThaiArea } from '../services/storage';
 import { getPlotLandTax, TAX_USAGE_CONFIGS } from '../services/landTax';
+import { triggerPrint } from '../utils/print';
 
 interface KPISimulatorProps {
   plots: LandPlot[];
@@ -75,7 +77,7 @@ export const KPISimulator: React.FC<KPISimulatorProps> = ({
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="p-6 rounded-2xl bg-gradient-to-r from-emerald-950/60 via-slate-900 to-slate-900 border border-emerald-500/20 shadow-xl">
+      <div className="p-6 rounded-2xl bg-gradient-to-r from-emerald-950/60 via-slate-900 to-slate-900 border border-emerald-500/20 shadow-xl print:hidden">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 mb-2">
@@ -88,10 +90,22 @@ export const KPISimulator: React.FC<KPISimulatorProps> = ({
               ปรับอัตราผลตอบแทนเป้าหมาย คำนวณหักค่าคอมมิชชั่นและค่าธรรมเนียมโอน พร้อมบันทึกเป็นราคาตั้งใจขาย (Target KPI)
             </p>
           </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => triggerPrint('portrait')}
+              className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-400/30 text-xs sm:text-sm font-semibold flex items-center gap-2 shadow-lg shadow-indigo-600/25 transition-all cursor-pointer"
+              title="พิมพ์รายงานแบบจำลองประมาณการกำไร (A4 PDF / Print)"
+            >
+              <Printer className="w-4 h-4 text-white" />
+              <span>พิมพ์รายงาน</span>
+            </button>
+          </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 print:hidden">
         {/* Left Controls: Select Plot & Sliders */}
         <div className="lg:col-span-5 space-y-6">
           <div className="p-5 rounded-xl bg-slate-900/80 border border-slate-800 space-y-5">
@@ -431,6 +445,185 @@ export const KPISimulator: React.FC<KPISimulatorProps> = ({
                 )}
               </button>
             </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Printable KPI & Profit Simulation Report (A4 Format) */}
+      <div id="printable-kpi-simulation" className="hidden print:block text-black bg-white p-6 max-w-full">
+        {/* Document Header */}
+        <div className="border-b-2 border-black pb-4 mb-4">
+          <div className="flex justify-between items-start">
+            <div>
+              <span className="text-xs uppercase tracking-widest font-bold text-gray-600 block">
+                LAND PORTFOLIO & TRADING LEDGER SYSTEM
+              </span>
+              <h1 className="text-xl font-bold text-black mt-0.5">
+                รายงานผลจำลองประมาณการราคาขายและผลตอบแทนการลงทุน (KPI Simulation Report)
+              </h1>
+              <p className="text-xs text-gray-600 mt-1">
+                การจำลองกลยุทธ์การตั้งราคาขาย หักค่าใช้จ่ายในการขาย และคำนวณกำไรสุทธิแท้จริง (Net Realized Profit)
+              </p>
+            </div>
+            <div className="text-right text-xs text-gray-700">
+              <div className="font-bold">วันที่พิมพ์: {new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })}</div>
+              <div>เวลา: {new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })} น.</div>
+              <div className="text-[10px] text-gray-500 mt-0.5 font-mono">SIMULATION SCENARIO</div>
+            </div>
+          </div>
+        </div>
+
+        {selectedPlot ? (
+          <>
+            {/* Plot Details */}
+            <div className="mb-4">
+              <h2 className="text-xs font-bold uppercase tracking-wider bg-gray-100 p-1.5 border border-black mb-2 text-black">
+                1. ข้อมูลแปลงที่ดินที่เลือกทำการจำลอง (Selected Land Plot)
+              </h2>
+              <table className="w-full text-xs border-collapse border border-black mb-2">
+                <tbody>
+                  <tr className="border-b border-black">
+                    <td className="p-2 font-bold bg-gray-50 border-r border-black w-36">ลำดับ / ชื่อแปลง:</td>
+                    <td className="p-2 font-semibold">แปลง #{selectedPlot.orderNumber}: {selectedPlot.title}</td>
+                    <td className="p-2 font-bold bg-gray-50 border-x border-black w-36">สถานะปัจจุบัน:</td>
+                    <td className="p-2 font-semibold">
+                      {selectedPlot.status === 'sold' ? 'ขายแล้ว' : selectedPlot.status === 'consignment' ? 'รับขายฝาก' : selectedPlot.status === 'for_sale' ? 'กำลังประกาศขาย' : 'ถือครอง'}
+                    </td>
+                  </tr>
+                  <tr className="border-b border-black">
+                    <td className="p-2 font-bold bg-gray-50 border-r border-black">ทำเลที่ตั้ง:</td>
+                    <td className="p-2">ต.{selectedPlot.subdistrict} อ.{selectedPlot.district} จ.{selectedPlot.province}</td>
+                    <td className="p-2 font-bold bg-gray-50 border-x border-black">ประเภทกรรมสิทธิ์:</td>
+                    <td className="p-2">{selectedPlot.landType}</td>
+                  </tr>
+                  <tr className="border-b border-black">
+                    <td className="p-2 font-bold bg-gray-50 border-r border-black">ขนาดเนื้อที่ดิน:</td>
+                    <td className="p-2 font-semibold">
+                      {formatThaiArea(selectedPlot.rai, selectedPlot.ngan, selectedPlot.sqWah)} ({selectedPlot.totalSqWah.toLocaleString('th-TH')} ตร.ว.)
+                    </td>
+                    <td className="p-2 font-bold bg-gray-50 border-x border-black">ต้นทุนซื้อรวมทั้งสิ้น:</td>
+                    <td className="p-2 font-bold font-mono">{formatCurrency(selectedPlot.totalCost)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            {/* Simulation Parameters & Results */}
+            <div className="mb-4">
+              <h2 className="text-xs font-bold uppercase tracking-wider bg-gray-100 p-1.5 border border-black mb-2 text-black">
+                2. ผลการจำลองการเงินและผลตอบแทนสุทธิ (Financial Simulation Breakdown)
+              </h2>
+              <table className="w-full text-xs border-collapse border border-black">
+                <thead>
+                  <tr className="bg-gray-200 border-b border-black">
+                    <th className="p-2 text-left font-bold border-r border-black">รายการวิเคราะห์ทางการเงิน</th>
+                    <th className="p-2 text-right font-bold border-r border-black w-44">จำนวนเงิน / อัตรา</th>
+                    <th className="p-2 text-left font-bold w-48">หมายเหตุประกอบ</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-black/30">
+                  <tr>
+                    <td className="p-2 font-medium border-r border-black">อัตรากำไรเป้าหมายที่ตั้งไว้ (Target Margin)</td>
+                    <td className="p-2 text-right font-mono font-bold border-r border-black">+{targetMarginPercent}%</td>
+                    <td className="p-2 text-gray-600 text-[11px]">การตั้งเป้าหมายส่วนต่างกำไรขั้นต้น</td>
+                  </tr>
+                  <tr className="bg-gray-50 font-bold">
+                    <td className="p-2 border-r border-black">ราคาตั้งขายจำลอง (Gross Selling Price)</td>
+                    <td className="p-2 text-right font-mono border-r border-black text-sm">{formatCurrency(simulatedSellingPrice)}</td>
+                    <td className="p-2 text-gray-700 text-[11px] font-mono">
+                      ~{pricePerSqWah.toLocaleString('th-TH')} บ./ตร.ว. ({pricePerRai.toLocaleString('th-TH')} บ./ไร่)
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="p-2 font-medium border-r border-black text-rose-800">
+                      หัก: ค่าคอมมิชชั่นนายหน้า ({commissionRate}%)
+                    </td>
+                    <td className="p-2 text-right font-mono text-rose-800 border-r border-black">
+                      -{formatCurrency(estimatedCommission)}
+                    </td>
+                    <td className="p-2 text-gray-600 text-[11px]">ประมาณการค่าตอบแทนตัวแทนนายหน้า</td>
+                  </tr>
+                  <tr>
+                    <td className="p-2 font-medium border-r border-black text-rose-800">
+                      หัก: ค่าธรรมเนียมการโอนและภาษีขาย (~{taxRate}%)
+                    </td>
+                    <td className="p-2 text-right font-mono text-rose-800 border-r border-black">
+                      -{formatCurrency(estimatedTax)}
+                    </td>
+                    <td className="p-2 text-gray-600 text-[11px]">สัดส่วนภาระผู้ขายตามมาตรฐาน</td>
+                  </tr>
+                  {includeLandTax && accruedLandTax > 0 && (
+                    <tr>
+                      <td className="p-2 font-medium border-r border-black text-rose-800">
+                        หัก: ภาษีที่ดินและสิ่งปลูกสร้างสะสม ({holdingPeriodMonths} เดือน)
+                      </td>
+                      <td className="p-2 text-right font-mono text-rose-800 border-r border-black">
+                        -{formatCurrency(accruedLandTax)}
+                      </td>
+                      <td className="p-2 text-gray-600 text-[11px]">ภาระภาษีที่ดินประจำปีตาม พ.ร.บ.</td>
+                    </tr>
+                  )}
+                  <tr className="bg-gray-100 font-semibold border-t border-b border-black">
+                    <td className="p-2 border-r border-black">เงินสดรับสุทธิหลังหักค่าใช้จ่ายการขาย (Net Proceeds)</td>
+                    <td className="p-2 text-right font-mono border-r border-black font-bold">{formatCurrency(netProceeds)}</td>
+                    <td className="p-2 text-gray-700 text-[11px]">กระแสเงินสดรับก่อนหักต้นทุนซื้อ</td>
+                  </tr>
+                  <tr>
+                    <td className="p-2 font-medium border-r border-black">
+                      หัก: ต้นทุนซื้อและพัฒนาที่ดินทั้งหมด
+                    </td>
+                    <td className="p-2 text-right font-mono border-r border-black">
+                      -{formatCurrency(selectedPlot.totalCost)}
+                    </td>
+                    <td className="p-2 text-gray-600 text-[11px]">ต้นทุนซื้อ + ค่าธรรมเนียม + รังวัด + พัฒนา</td>
+                  </tr>
+                  <tr className="bg-gray-200 font-bold border-t-2 border-b-2 border-black">
+                    <td className="p-2.5 border-r border-black text-sm">กำไรสุทธิแท้จริง (Realized Net Profit)</td>
+                    <td className={`p-2.5 text-right font-mono text-base border-r border-black ${netProfit >= 0 ? 'text-black' : 'text-rose-700'}`}>
+                      {netProfit >= 0 ? `+${formatCurrency(netProfit)}` : formatCurrency(netProfit)}
+                    </td>
+                    <td className="p-2.5 text-xs font-bold">
+                      {netProfit >= 0 ? 'กำไรตามเป้าหมาย' : 'ขาดทุน (ต่ำกว่าต้นทุน)'}
+                    </td>
+                  </tr>
+                  <tr className="bg-gray-50">
+                    <td className="p-2 font-bold border-r border-black">อัตราผลตอบแทนสุทธิ (Actual Net ROI)</td>
+                    <td className="p-2 text-right font-mono font-bold text-sm border-r border-black">
+                      {netROI.toFixed(2)}%
+                    </td>
+                    <td className="p-2 text-gray-700 text-[11px]">
+                      อัตราต่อปี (Annualized): ~{(holdingPeriodMonths > 0 ? (netROI / (holdingPeriodMonths / 12)).toFixed(2) : netROI.toFixed(2))}%/ปี (ระยะเวลา {holdingPeriodMonths} เดือน)
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            {/* Assessment Note */}
+            <div className="p-3 border border-gray-400 bg-gray-50 text-xs mb-6">
+              <span className="font-bold text-black block mb-0.5">ข้อสรุปและการประเมินความเป็นไปได้:</span>
+              <p className="text-gray-700 leading-relaxed">
+                การตั้งราคาขายที่ {formatCurrency(simulatedSellingPrice)} สอดคล้องกับกลยุทธ์สร้างผลตอบแทนสุทธิ {netROI.toFixed(1)}% หลังหักค่าใช้จ่ายการขายทั้งหมดเรียบร้อยแล้ว ราคาเฉลี่ยต่อตารางวาอยู่ที่ {pricePerSqWah.toLocaleString('th-TH')} บาท ซึ่งเหมาะสมสำหรับนำไปตั้งเป็นราคาขายเป้าหมาย (Target KPI)
+              </p>
+            </div>
+          </>
+        ) : (
+          <div className="p-8 text-center text-gray-500 text-xs">
+            ไม่พบข้อมูลแปลงที่ดินที่เลือก
+          </div>
+        )}
+
+        {/* Signatures */}
+        <div className="pt-6 border-t border-gray-300 grid grid-cols-2 gap-8 text-center text-xs mt-6">
+          <div>
+            <div className="border-b border-black w-48 mx-auto mb-2 h-10"></div>
+            <div className="font-bold">ผู้วิเคราะห์แบบจำลองทางการเงิน</div>
+            <div className="text-gray-500 text-[10px]">วันที่: ....../....../......</div>
+          </div>
+          <div>
+            <div className="border-b border-black w-48 mx-auto mb-2 h-10"></div>
+            <div className="font-bold">ผู้อนุมัติราคาขายเป้าหมาย / กรรมการ</div>
+            <div className="text-gray-500 text-[10px]">วันที่: ....../....../......</div>
           </div>
         </div>
       </div>

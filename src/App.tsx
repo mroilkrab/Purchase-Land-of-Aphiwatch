@@ -11,7 +11,7 @@ import {
   loadPlotsFromIndexedDB,
   loadSettingsFromIndexedDB
 } from './services/storage';
-import { initAuth, googleSignIn, logoutGoogle, getAccessToken } from './services/firebaseAuth';
+import { initAuth, googleSignIn, logoutGoogle, getAccessToken, GoogleAuthErrorInfo, parseGoogleAuthError } from './services/firebaseAuth';
 import { createGoogleSheet, updateExistingGoogleSheet } from './services/googleSheets';
 import { LandPlot, PortfolioSettings, AppFontSize } from './types/land';
 import { Navbar } from './components/Navbar';
@@ -24,6 +24,7 @@ import { LiveArtifactView } from './components/LiveArtifactView';
 import { SettingsAndBackup } from './components/SettingsAndBackup';
 import { LandFormModal } from './components/LandFormModal';
 import { LandDetailModal } from './components/LandDetailModal';
+import { GoogleAuthTroubleshootModal } from './components/GoogleAuthTroubleshootModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
 
@@ -38,6 +39,8 @@ export default function App() {
   const [selectedPlotForDetail, setSelectedPlotForDetail] = useState<LandPlot | null>(null);
   const [tableSearchQuery, setTableSearchQuery] = useState<string>('');
   const [tableStatusFilter, setTableStatusFilter] = useState<string>('all');
+  const [authErrorInfo, setAuthErrorInfo] = useState<GoogleAuthErrorInfo | null>(null);
+  const [isAuthTroubleshootOpen, setIsAuthTroubleshootOpen] = useState(false);
 
   // Auth state
   const [user, setUser] = useState<User | null>(null);
@@ -218,7 +221,7 @@ export default function App() {
   // Auth listener
   useEffect(() => {
     const unsubscribe = initAuth(
-      (authedUser) => {
+      (authedUser: User) => {
         setUser(authedUser);
       },
       () => {
@@ -235,13 +238,20 @@ export default function App() {
       const res = await googleSignIn();
       if (res?.user) {
         setUser(res.user);
+        setAuthErrorInfo(null);
+        setIsAuthTroubleshootOpen(false);
         showToast(`ยินดีต้อนรับคุณ ${res.user.displayName || res.user.email}`);
         // If we have plots, offer or perform initial sync
         syncPlotsToGoogleSheet(plots, 'เข้าสู่ระบบสำเร็จ ซิงค์ข้อมูล');
       }
     } catch (err: any) {
       console.error('Login error:', err);
-      showToast('ไม่สามารถเชื่อมต่อบัญชี Google ได้ กรุณาลองใหม่อีกครั้ง');
+      const parsedInfo = err.authErrorInfo || parseGoogleAuthError(err);
+      setAuthErrorInfo(parsedInfo);
+      if (!parsedInfo.isCancelled) {
+        setIsAuthTroubleshootOpen(true);
+      }
+      showToast(`⚠️ ${parsedInfo.title}`);
     }
   };
 
@@ -466,6 +476,7 @@ export default function App() {
             user={user}
             onLoginGoogle={handleLogin}
             onNavigateToTable={() => setActiveTab('table')}
+            onOpenGoogleAuthTroubleshoot={() => setIsAuthTroubleshootOpen(true)}
           />
         )}
       </main>
@@ -528,6 +539,14 @@ export default function App() {
           />
         </ErrorBoundary>
       )}
+
+      {/* Google Auth Troubleshoot Modal for Vercel / Custom Domains */}
+      <GoogleAuthTroubleshootModal
+        isOpen={isAuthTroubleshootOpen}
+        onClose={() => setIsAuthTroubleshootOpen(false)}
+        errorInfo={authErrorInfo}
+        onRetry={handleLogin}
+      />
 
       {/* Toast Notification */}
       {toastMessage && (

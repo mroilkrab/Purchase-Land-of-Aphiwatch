@@ -124,6 +124,23 @@ export interface QuickNoteItem {
 
 export type AppFontSize = 'sm' | 'base' | 'lg' | 'xl';
 
+export type UserRole = 'owner' | 'editor' | 'viewer';
+
+export interface AuthorizedUser {
+  id: string; // email or unique id
+  email: string;
+  displayName?: string;
+  photoUrl?: string;
+  role: UserRole; // 'owner': Full access & permissions; 'editor': Add/Edit plots; 'viewer': Read & print only
+  status: 'active' | 'pending' | 'revoked';
+  addedAt: string;
+  addedBy?: string;
+  lastLoginAt?: string;
+  notes?: string;
+}
+
+export type AccessControlPolicy = 'whitelist_only' | 'open_team';
+
 export interface PortfolioSettings {
   ownerName: string;
   portfolioTitle: string;
@@ -135,6 +152,9 @@ export interface PortfolioSettings {
   currency: string;
   fontSize?: AppFontSize;
   theme?: 'dark' | 'light';
+  authorizedUsers?: AuthorizedUser[];
+  accessPolicy?: AccessControlPolicy;
+  adminEmails?: string[];
 }
 
 export interface KPIStats {

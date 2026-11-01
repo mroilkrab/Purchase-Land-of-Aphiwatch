@@ -37,8 +37,10 @@ import {
   Receipt,
   Download,
   Loader2,
-  Check
+  Check,
+  Key
 } from 'lucide-react';
+
 import { LandPlot, LandStatus, PortfolioSettings } from '../types/land';
 import { formatCurrency, formatThaiArea, calculatePlotHoldingInfo } from '../services/storage';
 import { LandComparisonModal } from './LandComparisonModal';
@@ -67,6 +69,8 @@ interface LandTableProps {
   isGoogleAuthed?: boolean;
   onLoginGoogle?: () => void;
   settings?: PortfolioSettings;
+  userRole?: 'owner' | 'editor' | 'viewer';
+  onConnectSheetsScope?: () => void;
 }
 
 type PriceRangePreset = 'all' | 'under_100k' | '100k_500k' | '500k_1m' | '1m_5m' | 'over_5m' | 'custom';
@@ -89,7 +93,11 @@ export const LandTable: React.FC<LandTableProps> = ({
   isGoogleAuthed = false,
   onLoginGoogle,
   settings,
+  userRole = 'owner',
+  onConnectSheetsScope,
 }) => {
+
+
   // View mode: 'table' (full spreadsheet) or 'cards' (responsive grid fitting every screen)
   const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
 
@@ -608,7 +616,19 @@ export const LandTable: React.FC<LandTableProps> = ({
               <span>เปิด Google Sheet</span>
             </a>
           )}
+          {isGoogleAuthed && (sheetSyncStatus?.message?.includes('สิทธิ์') || sheetSyncStatus?.message?.includes('insufficient') || sheetSyncStatus?.message?.includes('Insufficient')) && (
+            <button
+              type="button"
+              onClick={onConnectSheetsScope || onSyncSheet}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold shadow-md shadow-amber-500/20 transition-all cursor-pointer animate-pulse"
+              title="กดยืนยันสิทธิ์ Google Sheets & Drive เพื่อเริ่มการซิงค์"
+            >
+              <Key className="w-3.5 h-3.5" />
+              <span>🔑 เชื่อมต่อสิทธิ์ Google Sheets</span>
+            </button>
+          )}
           {isGoogleAuthed && onSyncSheet && (
+
             <button
               onClick={onSyncSheet}
               disabled={isSyncingSheet}
@@ -722,13 +742,24 @@ export const LandTable: React.FC<LandTableProps> = ({
               <span>พิมพ์ / PDF</span>
             </button>
 
-            <button
-              onClick={onAddNewPlot}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold shadow-md shadow-emerald-600/30 transition-all cursor-pointer active:scale-95"
-            >
-              <Plus className="w-4 h-4" />
-              <span className="hidden sm:inline">เพิ่มแปลงที่ดิน</span>
-            </button>
+            {userRole === 'viewer' ? (
+              <span
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-sky-500/10 text-sky-300 rounded-xl text-xs font-semibold border border-sky-500/20"
+                title="โหมดผู้เข้าชม: สามารถค้นหา กรอง และพิมพ์รายงาน A4 ได้ แต่ไม่สามารถเพิ่ม/แก้ไขข้อมูลแปลงได้"
+              >
+                <Eye className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">โหมดผู้เข้าชม (Viewer)</span>
+              </span>
+            ) : (
+              <button
+                onClick={onAddNewPlot}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold shadow-md shadow-emerald-600/30 transition-all cursor-pointer active:scale-95"
+              >
+                <Plus className="w-4 h-4" />
+                <span className="hidden sm:inline">เพิ่มแปลงที่ดิน</span>
+              </button>
+            )}
+
           </div>
         </div>
 

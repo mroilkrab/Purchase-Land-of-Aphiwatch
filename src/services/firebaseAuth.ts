@@ -33,14 +33,23 @@ const app = !getApps().length ? initializeApp(activeFirebaseConfig) : getApp();
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 
-const provider = new GoogleAuthProvider();
-provider.addScope('https://www.googleapis.com/auth/spreadsheets');
-provider.addScope('https://www.googleapis.com/auth/drive.file');
-provider.setCustomParameters({
+// Base Provider: Standard Google Sign-In (Email, Profile)
+// Does NOT request sensitive scopes, so ANY Google account can sign in without being blocked by Google's unverified app check!
+export const baseGoogleProvider = new GoogleAuthProvider();
+baseGoogleProvider.setCustomParameters({
   prompt: 'select_account',
 });
 
+// Elevated Provider: Only requested when user connects Google Sheets / Drive
+export const sheetsGoogleProvider = new GoogleAuthProvider();
+sheetsGoogleProvider.addScope('https://www.googleapis.com/auth/spreadsheets');
+sheetsGoogleProvider.addScope('https://www.googleapis.com/auth/drive.file');
+sheetsGoogleProvider.setCustomParameters({
+  prompt: 'consent',
+});
+
 const TOKEN_STORAGE_KEY = 'google_oauth_access_token_v1';
+const SHEETS_TOKEN_STORAGE_KEY = 'google_oauth_sheets_token_v1';
 
 let isSigningIn = false;
 let cachedAccessToken: string | null = (() => {
@@ -50,6 +59,15 @@ let cachedAccessToken: string | null = (() => {
     return null;
   }
 })();
+
+let cachedSheetsAccessToken: string | null = (() => {
+  try {
+    return sessionStorage.getItem(SHEETS_TOKEN_STORAGE_KEY) || localStorage.getItem(SHEETS_TOKEN_STORAGE_KEY) || null;
+  } catch (e) {
+    return null;
+  }
+})();
+
 
 export interface GoogleAuthErrorInfo {
   code: string;
@@ -61,11 +79,13 @@ export interface GoogleAuthErrorInfo {
   isUnauthorizedDomain: boolean;
   isPopupBlocked: boolean;
   isCancelled: boolean;
+  isUnverifiedApp: boolean;
   title: string;
   descriptionThai: string;
   stepsToFix: string[];
   firebaseConsoleUrl: string;
   googleCloudConsoleUrl: string;
+  googleCloudConsentUrl: string;
 }
 
 export const getDomainDiagnosticInfo = () => {
@@ -83,6 +103,7 @@ export const getDomainDiagnosticInfo = () => {
     authDomain: activeFirebaseConfig.authDomain,
     firebaseConsoleSettingsUrl: `https://console.firebase.google.com/project/${projectId}/authentication/settings`,
     googleCloudConsoleCredentialsUrl: `https://console.cloud.google.com/apis/credentials?project=${projectId}`,
+    googleCloudConsentUrl: `https://console.cloud.google.com/apis/credentials/consent?project=${projectId}`,
   };
 };
 
@@ -91,15 +112,32 @@ export const parseGoogleAuthError = (error: any): GoogleAuthErrorInfo => {
   const originalMessage = error?.message || String(error);
   const diag = getDomainDiagnosticInfo();
 
+  const msgLower = (originalMessage + ' ' + code).toLowerCase();
   const isUnauthorizedDomain = code === 'auth/unauthorized-domain';
   const isPopupBlocked = code === 'auth/popup-blocked';
   const isCancelled = code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request';
+  const isUnverifiedApp = 
+    msgLower.includes('access_denied') || 
+    msgLower.includes('unverified') || 
+    msgLower.includes('blocked') || 
+    msgLower.includes('verification') ||
+    msgLower.includes('developer hasn\'t given you access') ||
+    msgLower.includes('ยังไม่ผ่านกระบวนการยืนยัน');
 
   let title = 'ไม่สามารถเชื่อมต่อบัญชี Google ได้';
   let descriptionThai = originalMessage;
   let stepsToFix: string[] = [];
 
-  if (isUnauthorizedDomain) {
+  if (isUnverifiedApp) {
+    title = 'การเข้าถึงถูกบล็อก: ยังไม่ผ่านกระบวนการยืนยันตัวตนของ Google (Unverified App)';
+    descriptionThai = `Google บล็อกไม่ให้อีเมลอื่นล็อกอินเนื่องจากมีการขอสิทธิ์ Google Sheets / Drive (Sensitive Scope) ขณะที่สถานะโครงการใน Google Cloud Console อยู่ในโหมดทดสอบ (Testing Mode)`;
+    stepsToFix = [
+      '1. ให้ล็อกอินด้วย "เข้าสู่ระบบโหมดมาตรฐาน (Standard Login)" ซึ่งจะขอเฉพาะสิทธิ์อีเมลและโปรไฟล์ ทำให้ทุกล็อกอินผ่านได้ 100% โดยไม่ต้องขอสิทธิ์ Sheets',
+      '2. หากต้องการให้บัญชีนี้ซิงค์ Google Sheets ได้ด้วย: เจ้าของระบบเปิด Google Cloud Console -> APIs & Services -> OAuth consent screen',
+      '3. ในหัวข้อ "Test users (ผู้ใช้ทดสอบ)" ให้กด "+ ADD USERS" แล้วกรอกอีเมลนี้ลงไป จากนั้นกด Save',
+      '4. หรือเปลี่ยนสถานะ Publishing status จาก "Testing" เป็น "Publish App" เพื่อให้ทุกบัญชีเข้าใช้งานได้',
+    ];
+  } else if (isUnauthorizedDomain) {
     title = 'โดเมน Vercel ยังไม่ได้รับอนุญาตใน Firebase Console';
     descriptionThai = `ระบบ Firebase ไม่อนุญาตให้ล็อกอินจากโดเมน "${diag.hostname}" เนื่องจากยังไม่ได้เพิ่มชื่อโดเมนนี้ในรายการ Authorized Domains ของ Firebase`;
     stepsToFix = [
@@ -140,28 +178,46 @@ export const parseGoogleAuthError = (error: any): GoogleAuthErrorInfo => {
     isUnauthorizedDomain,
     isPopupBlocked,
     isCancelled,
+    isUnverifiedApp,
     title,
     descriptionThai,
     stepsToFix,
     firebaseConsoleUrl: diag.firebaseConsoleSettingsUrl,
     googleCloudConsoleUrl: diag.googleCloudConsoleCredentialsUrl,
+    googleCloudConsentUrl: diag.googleCloudConsentUrl,
   };
 };
 
-export const googleSignIn = async (): Promise<{ user: User; accessToken: string } | null> => {
+/**
+ * Standard Sign-in: Uses baseGoogleProvider (Email, Profile) by default.
+ * Does NOT get blocked by Google unverified app warning when other emails log in!
+ */
+export const googleSignIn = async (
+  options?: { requestSheetsScope?: boolean }
+): Promise<{ user: User; accessToken: string | null } | null> => {
   try {
     isSigningIn = true;
-    const result = await signInWithPopup(auth, provider);
+    const targetProvider = options?.requestSheetsScope ? sheetsGoogleProvider : baseGoogleProvider;
+    const result = await signInWithPopup(auth, targetProvider);
     const credential = GoogleAuthProvider.credentialFromResult(result);
-    if (!credential?.accessToken) {
-      throw new Error('Failed to get access token from Google Auth');
+    
+    if (credential?.accessToken) {
+      cachedAccessToken = credential.accessToken;
+      try {
+        sessionStorage.setItem(TOKEN_STORAGE_KEY, credential.accessToken);
+        localStorage.setItem(TOKEN_STORAGE_KEY, credential.accessToken);
+      } catch (e) {}
+
+      if (options?.requestSheetsScope) {
+        cachedSheetsAccessToken = credential.accessToken;
+        try {
+          sessionStorage.setItem(SHEETS_TOKEN_STORAGE_KEY, credential.accessToken);
+          localStorage.setItem(SHEETS_TOKEN_STORAGE_KEY, credential.accessToken);
+        } catch (e) {}
+      }
     }
-    cachedAccessToken = credential.accessToken;
-    try {
-      sessionStorage.setItem(TOKEN_STORAGE_KEY, credential.accessToken);
-      localStorage.setItem(TOKEN_STORAGE_KEY, credential.accessToken);
-    } catch (e) {}
-    return { user: result.user, accessToken: cachedAccessToken };
+    
+    return { user: result.user, accessToken: credential?.accessToken || cachedAccessToken };
   } catch (error: any) {
     const errorInfo = parseGoogleAuthError(error);
     error.authErrorInfo = errorInfo;
@@ -169,6 +225,19 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
     throw error;
   } finally {
     isSigningIn = false;
+  }
+};
+
+/**
+ * Specifically request Google Sheets & Drive elevated scope (for Sheet sync feature)
+ */
+export const connectGoogleSheetsScope = async (): Promise<string | null> => {
+  try {
+    const res = await googleSignIn({ requestSheetsScope: true });
+    return res?.accessToken || null;
+  } catch (error: any) {
+    console.error('Connect Google Sheets Scope error:', error);
+    throw error;
   }
 };
 
@@ -197,14 +266,63 @@ export const getAccessToken = async (): Promise<string | null> => {
   return null;
 };
 
+/**
+ * Retrieves the OAuth token with Google Sheets & Drive scopes.
+ * If not yet granted, returns null or fallback to base token.
+ */
+export const getSheetsAccessToken = async (forcePrompt = false): Promise<string | null> => {
+  if (!forcePrompt) {
+    if (cachedSheetsAccessToken) return cachedSheetsAccessToken;
+    try {
+      const stored = sessionStorage.getItem(SHEETS_TOKEN_STORAGE_KEY) || localStorage.getItem(SHEETS_TOKEN_STORAGE_KEY);
+      if (stored) {
+        cachedSheetsAccessToken = stored;
+        return stored;
+      }
+    } catch (e) {}
+  }
+
+  if (forcePrompt) {
+    const token = await connectGoogleSheetsScope();
+    return token;
+  }
+
+  // Fallback to base token (which might have been granted sheets scope previously)
+  return getAccessToken();
+};
+
+export const hasGrantedSheetsScope = (): boolean => {
+  if (cachedSheetsAccessToken) return true;
+  try {
+    return !!(sessionStorage.getItem(SHEETS_TOKEN_STORAGE_KEY) || localStorage.getItem(SHEETS_TOKEN_STORAGE_KEY));
+  } catch (e) {
+    return false;
+  }
+};
+
+export const isInsufficientScopesError = (error: any): boolean => {
+  const msg = (error?.message || String(error)).toLowerCase();
+  return (
+    msg.includes('insufficient authentication scopes') ||
+    msg.includes('insufficient scopes') ||
+    msg.includes('insufficient_scope') ||
+    msg.includes('access_token_scope_insufficient') ||
+    (msg.includes('403') && msg.includes('scope'))
+  );
+};
+
 export const logoutGoogle = async () => {
   await signOut(auth);
   cachedAccessToken = null;
+  cachedSheetsAccessToken = null;
   try {
     sessionStorage.removeItem(TOKEN_STORAGE_KEY);
     localStorage.removeItem(TOKEN_STORAGE_KEY);
+    sessionStorage.removeItem(SHEETS_TOKEN_STORAGE_KEY);
+    localStorage.removeItem(SHEETS_TOKEN_STORAGE_KEY);
   } catch (e) {}
 };
+
 
 // Firestore Cloud Backup & Sync
 export const syncToFirestore = async (

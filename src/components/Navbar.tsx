@@ -21,8 +21,10 @@ import {
   Moon
 } from 'lucide-react';
 import { PortfolioSettings, AppFontSize } from '../types/land';
+import { getUserRole, ROLE_DEFINITIONS } from '../services/rbac';
 
 interface NavbarProps {
+
   activeTab: 'dashboard' | 'table' | 'map' | 'reports' | 'simulator' | 'artifact' | 'settings';
   setActiveTab: (tab: 'dashboard' | 'table' | 'map' | 'reports' | 'simulator' | 'artifact' | 'settings') => void;
   user: User | null;
@@ -85,7 +87,11 @@ export const Navbar: React.FC<NavbarProps> = ({
     onFontSizeChange(FONT_OPTIONS[newIdx].id);
   };
 
+  const currentUserRole = getUserRole(user, settings);
+  const roleDef = ROLE_DEFINITIONS[currentUserRole];
+
   return (
+
     <header className="sticky top-0 z-30 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 shadow-md">
       <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16 gap-2 sm:gap-4">
@@ -229,7 +235,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <span className="hidden sm:inline">เพิ่มแปลงที่ดิน</span>
             </button>
 
-            {/* Google Auth Status */}
+            {/* Google Auth Status & User Role Badge */}
             {user ? (
               <div className="flex items-center gap-2 pl-2 border-l border-slate-800 shrink-0">
                 {user.photoURL ? (
@@ -244,11 +250,21 @@ export const Navbar: React.FC<NavbarProps> = ({
                   </div>
                 )}
                 <div className="hidden lg:block text-left">
-                  <div className="text-xs font-medium text-slate-200 truncate max-w-[110px]">
-                    {user.displayName || user.email?.split('@')[0]}
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-medium text-slate-200 truncate max-w-[95px]">
+                      {user.displayName || user.email?.split('@')[0]}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('settings')}
+                      className={`px-1.5 py-0.2 rounded text-[10px] font-semibold border ${roleDef.colorBadge} hover:opacity-80 transition-opacity cursor-pointer`}
+                      title="สิทธิ์การใช้งานของคุณ - คลิกเพื่อไปที่หน้าจัดการสิทธิ์"
+                    >
+                      {currentUserRole === 'owner' ? 'Owner' : currentUserRole === 'editor' ? 'Editor' : 'Viewer'}
+                    </button>
                   </div>
                   <div className="text-[10px] text-emerald-400 flex items-center">
-                    <CloudCheck className="w-3 h-3 mr-1" /> ซิงค์อัตโนมัติ
+                    <CloudCheck className="w-3 h-3 mr-1" /> ซิงค์ทีมคลาวด์
                   </div>
                 </div>
                 <button
@@ -268,6 +284,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <span className="hidden sm:inline">เชื่อมต่อ Google</span>
               </button>
             )}
+
           </div>
         </div>
 

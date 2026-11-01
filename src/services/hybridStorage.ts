@@ -1,7 +1,8 @@
 import { LandPlot, PortfolioSettings } from '../types/land';
 import { savePlotsToStorage, saveSettingsToStorage } from './storage';
-import { getAccessToken } from './firebaseAuth';
+import { getAccessToken, getSheetsAccessToken, isInsufficientScopesError } from './firebaseAuth';
 import { ensureDriveFolder, uploadJsonSnapshotToDrive } from './googleDrive';
+
 import { createGoogleSheet, updateExistingGoogleSheet } from './googleSheets';
 import { CloudflareD1Config, syncWithCloudflareD1 } from './cloudflareD1';
 
@@ -64,7 +65,7 @@ export const runHybridSync = async (
 
   // 3. Tier 3: Google Drive & Google Sheets (Cloud File Archive & Spreadsheets)
   try {
-    const accessToken = await getAccessToken();
+    const accessToken = (await getSheetsAccessToken()) || (await getAccessToken());
     if (accessToken) {
       // 3A. Google Drive Snapshot
       try {
@@ -83,9 +84,12 @@ export const runHybridSync = async (
           webViewLink: driveUpload.webViewLink,
         };
       } catch (driveErr: any) {
+        const isScope = isInsufficientScopesError(driveErr);
         result.googleDrive = {
           success: false,
-          message: `Google Drive: ${driveErr.message || 'ซิงค์ไม่สำเร็จ'}`,
+          message: isScope
+            ? 'Google Drive: ยังไม่ได้ยืนยันอนุญาตสิทธิ์ (กดยืนยันสิทธิ์ Google Sheets & Drive)'
+            : `Google Drive: ${driveErr.message || 'ซิงค์ไม่สำเร็จ'}`,
         };
       }
 
@@ -107,11 +111,15 @@ export const runHybridSync = async (
           };
         }
       } catch (sheetErr: any) {
+        const isScope = isInsufficientScopesError(sheetErr);
         result.googleSheets = {
           success: false,
-          message: `Google Sheets Error: ${sheetErr.message}`,
+          message: isScope
+            ? 'Google Sheets: บัญชียังไม่ได้ยืนยันอนุญาตสิทธิ์ (กดยืนยันสิทธิ์ Google Sheets เพื่อเปิดการซิงค์)'
+            : `Google Sheets Error: ${sheetErr.message}`,
         };
       }
+
     } else {
       result.googleDrive = {
         success: false,

@@ -31,11 +31,32 @@ import {
   Trash2,
   PlusCircle,
   Table as TableIcon,
-  ArrowRight
+  ArrowRight,
+  Users,
+  UserCheck,
+  UserPlus,
+  Shield,
+  ShieldAlert,
+  KeyRound,
+  Lock
 } from 'lucide-react';
-import { PortfolioSettings, LandPlot } from '../types/land';
+import { PortfolioSettings, LandPlot, UserRole, AuthorizedUser, AccessControlPolicy } from '../types/land';
+import { getUserRole, hasPermission, ROLE_DEFINITIONS, upsertAuthorizedUser, removeAuthorizedUser } from '../services/rbac';
 import { createGoogleSheet, updateExistingGoogleSheet } from '../services/googleSheets';
-import { getAccessToken, syncToFirestore, loadFromFirestore, googleSignIn, getDomainDiagnosticInfo } from '../services/firebaseAuth';
+
+import { 
+  getAccessToken, 
+  getSheetsAccessToken, 
+  hasGrantedSheetsScope, 
+  connectGoogleSheetsScope, 
+  isInsufficientScopesError, 
+  syncToFirestore, 
+  loadFromFirestore, 
+  googleSignIn, 
+  getDomainDiagnosticInfo,
+  parseGoogleAuthError
+} from '../services/firebaseAuth';
+
 import { exportToJsonFile, exportToCsvFile, formatCurrency, formatThaiArea } from '../services/storage';
 import { parseCsvToPlots, getSampleCsvTemplate, CsvParseResult } from '../services/csvImporter';
 import { 
@@ -56,6 +77,7 @@ import {
   D1_WRANGLER_TOML
 } from '../services/cloudflareD1';
 import { runHybridSync, HybridSyncResult } from '../services/hybridStorage';
+import { GoogleApiStatusCard } from './GoogleApiStatusCard';
 
 interface SettingsAndBackupProps {
   settings: PortfolioSettings;
@@ -67,6 +89,7 @@ interface SettingsAndBackupProps {
   onLoginGoogle: () => void;
   onNavigateToTable?: () => void;
   onOpenGoogleAuthTroubleshoot?: () => void;
+  initialTab?: 'storage' | 'csv' | 'general' | 'hybrid' | 'permissions';
 }
 
 export const SettingsAndBackup: React.FC<SettingsAndBackupProps> = ({
@@ -79,6 +102,7 @@ export const SettingsAndBackup: React.FC<SettingsAndBackupProps> = ({
   onLoginGoogle,
   onNavigateToTable,
   onOpenGoogleAuthTroubleshoot,
+  initialTab,
 }) => {
   const [formData, setFormData] = useState<PortfolioSettings>(settings);
   const [existingSheetId, setExistingSheetId] = useState(settings.googleSheetId || '');
@@ -86,8 +110,27 @@ export const SettingsAndBackup: React.FC<SettingsAndBackupProps> = ({
   const [sheetSuccessUrl, setSheetSuccessUrl] = useState<string | null>(null);
   const [sheetError, setSheetError] = useState<string | null>(null);
 
-  const [activeSettingsTab, setActiveSettingsTab] = useState<'storage' | 'csv' | 'general' | 'hybrid'>('storage');
+  const [activeSettingsTab, setActiveSettingsTab] = useState<'storage' | 'csv' | 'general' | 'hybrid' | 'permissions'>(
+    initialTab || 'storage'
+  );
   const [isRunningDiagnostic, setIsRunningDiagnostic] = useState(false);
+
+  // User Permissions & Team Members state
+  const [newMemberEmail, setNewMemberEmail] = useState('');
+  const [newMemberName, setNewMemberName] = useState('');
+  const [newMemberRole, setNewMemberRole] = useState<UserRole>('editor');
+  const [newMemberNotes, setNewMemberNotes] = useState('');
+  const [memberFeedback, setMemberFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  const currentUserRole = getUserRole(user, formData);
+  const currentUserIsOwner = currentUserRole === 'owner';
+
+  useEffect(() => {
+    if (initialTab) {
+      setActiveSettingsTab(initialTab);
+    }
+  }, [initialTab]);
+
   const [storageDiagnostics, setStorageDiagnostics] = useState<{
     indexedDbOk: boolean;
     localStorageOk: boolean;
@@ -310,6 +353,45 @@ export const SettingsAndBackup: React.FC<SettingsAndBackupProps> = ({
     }
   };
 
+  // Connect Google Sheets Scope explicitly
+  const handleConnectSheetsScope = async () => {
+    try {
+      setSheetSyncing(true);
+      setSheetError(null);
+      const token = await connectGoogleSheetsScope();
+      if (token) {
+        setImportStatus({
+          type: 'success',
+          message: 'เชื่อมต่อและอนุญาตสิทธิ์ Google Sheets & Drive เรียบร้อยแล้ว!',
+        });
+        setTimeout(() => setImportStatus(null), 4000);
+        if (existingSheetId.trim()) {
+          const result = await updateExistingGoogleSheet(token, existingSheetId.trim(), plots, formData);
+          setSheetSuccessUrl(result.spreadsheetUrl);
+        } else {
+          const result = await createGoogleSheet(token, plots, formData);
+          setSheetSuccessUrl(result.spreadsheetUrl);
+          setExistingSheetId(result.spreadsheetId);
+          onUpdateSettings({
+            ...formData,
+            googleSheetId: result.spreadsheetId,
+            lastSyncedAt: new Date().toISOString(),
+          });
+        }
+      }
+    } catch (err: any) {
+      console.error('Connect sheets scope error:', err);
+      const parsed = parseGoogleAuthError(err);
+      if (parsed.isUnverifiedApp && onOpenGoogleAuthTroubleshoot) {
+        onOpenGoogleAuthTroubleshoot();
+      } else {
+        setSheetError(err.message || 'ไม่สามารถขอสิทธิ์ Google Sheets ได้');
+      }
+    } finally {
+      setSheetSyncing(false);
+    }
+  };
+
   // Google Sheets Export (Create new)
   const handleExportToNewSheet = async () => {
     try {
@@ -317,24 +399,47 @@ export const SettingsAndBackup: React.FC<SettingsAndBackupProps> = ({
       setSheetError(null);
       setSheetSuccessUrl(null);
 
-      const token = await getAccessToken();
-      if (!token) {
-        onLoginGoogle();
-        setSheetSyncing(false);
-        return;
+      let token = await getSheetsAccessToken();
+      const hasScope = hasGrantedSheetsScope();
+      if (!token || !hasScope) {
+        const authRes = await googleSignIn({ requestSheetsScope: true });
+        token = authRes?.accessToken || null;
+        if (!token) {
+          setSheetSyncing(false);
+          return;
+        }
       }
 
-      const result = await createGoogleSheet(token, plots, formData);
-      setSheetSuccessUrl(result.spreadsheetUrl);
-      setExistingSheetId(result.spreadsheetId);
-      onUpdateSettings({
-        ...formData,
-        googleSheetId: result.spreadsheetId,
-        lastSyncedAt: new Date().toISOString(),
-      });
+      try {
+        const result = await createGoogleSheet(token, plots, formData);
+        setSheetSuccessUrl(result.spreadsheetUrl);
+        setExistingSheetId(result.spreadsheetId);
+        onUpdateSettings({
+          ...formData,
+          googleSheetId: result.spreadsheetId,
+          lastSyncedAt: new Date().toISOString(),
+        });
+      } catch (innerErr: any) {
+        if (isInsufficientScopesError(innerErr)) {
+          const authRes = await googleSignIn({ requestSheetsScope: true });
+          if (authRes?.accessToken) {
+            const result = await createGoogleSheet(authRes.accessToken, plots, formData);
+            setSheetSuccessUrl(result.spreadsheetUrl);
+            setExistingSheetId(result.spreadsheetId);
+            onUpdateSettings({
+              ...formData,
+              googleSheetId: result.spreadsheetId,
+              lastSyncedAt: new Date().toISOString(),
+            });
+            return;
+          }
+        }
+        throw innerErr;
+      }
     } catch (err: any) {
       console.error('Google Sheets export error:', err);
-      setSheetError(err.message || 'ไม่สามารถส่งออกข้อมูลไปยัง Google Sheets ได้');
+      const isScope = isInsufficientScopesError(err);
+      setSheetError(isScope ? 'Request had insufficient authentication scopes. (กดยืนยันอนุญาตสิทธิ์ Google Sheets ด้านล่าง)' : (err.message || 'ไม่สามารถส่งออกข้อมูลไปยัง Google Sheets ได้'));
     } finally {
       setSheetSyncing(false);
     }
@@ -352,27 +457,50 @@ export const SettingsAndBackup: React.FC<SettingsAndBackupProps> = ({
       setSheetError(null);
       setSheetSuccessUrl(null);
 
-      const token = await getAccessToken();
-      if (!token) {
-        onLoginGoogle();
-        setSheetSyncing(false);
-        return;
+      let token = await getSheetsAccessToken();
+      const hasScope = hasGrantedSheetsScope();
+      if (!token || !hasScope) {
+        const authRes = await googleSignIn({ requestSheetsScope: true });
+        token = authRes?.accessToken || null;
+        if (!token) {
+          setSheetSyncing(false);
+          return;
+        }
       }
 
-      const result = await updateExistingGoogleSheet(token, existingSheetId.trim(), plots, formData);
-      setSheetSuccessUrl(result.spreadsheetUrl);
-      onUpdateSettings({
-        ...formData,
-        googleSheetId: result.spreadsheetId,
-        lastSyncedAt: new Date().toISOString(),
-      });
+      try {
+        const result = await updateExistingGoogleSheet(token, existingSheetId.trim(), plots, formData);
+        setSheetSuccessUrl(result.spreadsheetUrl);
+        onUpdateSettings({
+          ...formData,
+          googleSheetId: result.spreadsheetId,
+          lastSyncedAt: new Date().toISOString(),
+        });
+      } catch (innerErr: any) {
+        if (isInsufficientScopesError(innerErr)) {
+          const authRes = await googleSignIn({ requestSheetsScope: true });
+          if (authRes?.accessToken) {
+            const result = await updateExistingGoogleSheet(authRes.accessToken, existingSheetId.trim(), plots, formData);
+            setSheetSuccessUrl(result.spreadsheetUrl);
+            onUpdateSettings({
+              ...formData,
+              googleSheetId: result.spreadsheetId,
+              lastSyncedAt: new Date().toISOString(),
+            });
+            return;
+          }
+        }
+        throw innerErr;
+      }
     } catch (err: any) {
       console.error('Google Sheets update error:', err);
-      setSheetError(err.message || 'ไม่สามารถอัปเดต Google Sheet นี้ได้ ตรวจสอบสิทธิ์การเข้าถึง');
+      const isScope = isInsufficientScopesError(err);
+      setSheetError(isScope ? 'Request had insufficient authentication scopes. (กดยืนยันอนุญาตสิทธิ์ Google Sheets ด้านล่าง)' : (err.message || 'ไม่สามารถอัปเดต Google Sheet นี้ได้ ตรวจสอบสิทธิ์การเข้าถึง'));
     } finally {
       setSheetSyncing(false);
     }
   };
+
 
   // Cloudflare D1 Sync
   const handleSyncCloudflareD1 = async () => {
@@ -427,6 +555,16 @@ export const SettingsAndBackup: React.FC<SettingsAndBackupProps> = ({
     try {
       setHybridSyncing(true);
       setHybridResult(null);
+
+      // If user hasn't elevated Google Sheets scope yet, prompt via popup during this user click
+      if (!hasGrantedSheetsScope()) {
+        try {
+          await googleSignIn({ requestSheetsScope: true });
+        } catch (authErr) {
+          console.warn('User dismissed Sheets authorization modal:', authErr);
+        }
+      }
+
       const res = await runHybridSync(plots, formData, d1Config);
       setHybridResult(res);
     } catch (err: any) {
@@ -486,7 +624,77 @@ export const SettingsAndBackup: React.FC<SettingsAndBackupProps> = ({
     reader.readAsText(file);
   };
 
+  // Member Management Handlers
+  const handleAddMember = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newMemberEmail.trim()) {
+      setMemberFeedback({ type: 'error', message: 'กรุณากรอกอีเมล Google ของสมาชิก' });
+      return;
+    }
+    const updated = upsertAuthorizedUser(
+      formData,
+      {
+        email: newMemberEmail.trim(),
+        displayName: newMemberName.trim() || undefined,
+        role: newMemberRole,
+        notes: newMemberNotes.trim() || undefined,
+      },
+      user?.email || 'Admin'
+    );
+    setFormData(updated);
+    onUpdateSettings(updated);
+    setNewMemberEmail('');
+    setNewMemberName('');
+    setNewMemberNotes('');
+    setMemberFeedback({
+      type: 'success',
+      message: `เพิ่มสิทธิ์ให้กับ "${newMemberEmail.trim()}" ในฐานะ ${ROLE_DEFINITIONS[newMemberRole].labelThai} เรียบร้อยแล้ว`,
+    });
+    setTimeout(() => setMemberFeedback(null), 4000);
+  };
+
+  const handleChangeMemberRole = (email: string, role: UserRole) => {
+    const updated = upsertAuthorizedUser(
+      formData,
+      {
+        email,
+        role,
+      },
+      user?.email || 'Admin'
+    );
+    setFormData(updated);
+    onUpdateSettings(updated);
+    setMemberFeedback({
+      type: 'success',
+      message: `อัปเดตสิทธิ์ของ ${email} เป็น ${ROLE_DEFINITIONS[role].labelThai} สำเร็จ`,
+    });
+    setTimeout(() => setMemberFeedback(null), 3000);
+  };
+
+  const handleRemoveMember = (email: string) => {
+    if (confirm(`ต้องการยกเลิกสิทธิ์ของ ${email} หรือไม่?`)) {
+      const updated = removeAuthorizedUser(formData, email);
+      setFormData(updated);
+      onUpdateSettings(updated);
+      setMemberFeedback({
+        type: 'success',
+        message: `ยกเลิกสิทธิ์ของ ${email} เรียบร้อยแล้ว`,
+      });
+      setTimeout(() => setMemberFeedback(null), 3000);
+    }
+  };
+
+  const handleUpdatePolicy = (policy: AccessControlPolicy) => {
+    const updated: PortfolioSettings = {
+      ...formData,
+      accessPolicy: policy,
+    };
+    setFormData(updated);
+    onUpdateSettings(updated);
+  };
+
   return (
+
     <div className="space-y-8">
       {/* Header Banner */}
       <div className="p-6 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 border border-slate-700/60 shadow-xl">
@@ -553,6 +761,29 @@ export const SettingsAndBackup: React.FC<SettingsAndBackupProps> = ({
                 </span>
               </div>
             </div>
+
+            {/* Scope Elevation Prompt Banner if insufficient scopes detected */}
+            {(isInsufficientScopesError(hybridResult.googleSheets.message) || isInsufficientScopesError(hybridResult.googleDrive.message)) && (
+              <div className="mt-2 p-3 rounded-xl bg-amber-500/10 border border-amber-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-2.5 text-amber-300">
+                  <Key className="w-4 h-4 shrink-0 text-amber-400" />
+                  <span>
+                    <strong>Google Sheets & Drive ต้องได้รับอนุญาตสิทธิ์เข้าถึง:</strong> กดปุ่มเพื่อยืนยันสิทธิ์ในป๊อปอัปของ Google 1 ครั้ง
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await handleConnectSheetsScope();
+                    handleMasterHybridSync();
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold flex items-center justify-center gap-1.5 shadow-md cursor-pointer shrink-0 transition-transform active:scale-95"
+                >
+                  <Key className="w-3.5 h-3.5" />
+                  ยืนยันสิทธิ์ Google Sheets ตอนนี้
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -610,11 +841,33 @@ export const SettingsAndBackup: React.FC<SettingsAndBackupProps> = ({
           <Globe className="w-4 h-4 text-emerald-400" />
           <span>ไฮบริดคลาวด์ & D1 (Hybrid Architecture)</span>
         </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveSettingsTab('permissions')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer whitespace-nowrap ${
+            activeSettingsTab === 'permissions'
+              ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/30'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+          }`}
+        >
+          <Users className="w-4 h-4 text-emerald-400" />
+          <span>จัดการสิทธิ์ผู้ใช้งาน & สมาชิกทีม (Team Roles)</span>
+        </button>
       </div>
+
 
       {/* Tab 1: Data & Storage (แหล่งจัดเก็บข้อมูลและสถานะซิงค์คลาวด์) */}
       {activeSettingsTab === 'storage' && (
         <div className="space-y-6 animate-in fade-in duration-150">
+          {/* Real-time Google API Status & OAuth Scope Inspector Component */}
+          <GoogleApiStatusCard 
+            onScopeUpdated={() => {
+              // Trigger any re-evaluations if necessary
+            }} 
+            onOpenTroubleshootModal={onOpenGoogleAuthTroubleshoot} 
+          />
+
           {/* Storage Overview & Live Health Status Header */}
           <div className="p-6 rounded-2xl bg-slate-900 border border-slate-800 space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
@@ -814,6 +1067,26 @@ export const SettingsAndBackup: React.FC<SettingsAndBackupProps> = ({
                         เปิดดูใน Google Sheets <ExternalLink className="w-3 h-3" />
                       </a>
                     </div>
+                  )}
+                </div>
+
+                {/* OAuth Scope Elevation Status */}
+                <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-between gap-2 text-xs">
+                  <div className="flex items-center gap-2">
+                    <Key className="w-3.5 h-3.5 text-amber-400" />
+                    <span className="text-slate-300">สิทธิ์เข้าถึง Sheets & Drive:</span>
+                    <span className={hasGrantedSheetsScope() ? 'text-emerald-400 font-semibold' : 'text-amber-400 font-semibold'}>
+                      {hasGrantedSheetsScope() ? '✓ ได้รับสิทธิ์แล้ว' : '⚠️ ยังไม่ได้อนุญาต'}
+                    </span>
+                  </div>
+                  {!hasGrantedSheetsScope() && (
+                    <button
+                      type="button"
+                      onClick={handleConnectSheetsScope}
+                      className="px-2.5 py-1 rounded-md bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 text-[11px] font-semibold cursor-pointer flex items-center gap-1 transition-colors"
+                    >
+                      <Key className="w-3 h-3" /> ยืนยันสิทธิ์
+                    </button>
                   )}
                 </div>
 
@@ -2008,6 +2281,493 @@ export const SettingsAndBackup: React.FC<SettingsAndBackupProps> = ({
         </div>
       </div>
     )}
+
+      {/* Tab 5: User Permissions & Team Roles (จัดการสิทธิ์ผู้ใช้งาน & สมาชิกทีม) */}
+      {activeSettingsTab === 'permissions' && (
+        <div className="space-y-6 animate-in fade-in duration-150">
+          {/* Header & Overview */}
+          <div className="p-6 rounded-2xl bg-slate-900 border border-slate-800 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
+              <div>
+                <h3 className="font-bold text-white text-base sm:text-lg flex items-center gap-2">
+                  <Users className="w-5 h-5 text-emerald-400" />
+                  จัดการสิทธิ์ผู้ใช้งาน & สมาชิกทีม (Team Roles & Access Control)
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  ระบบควบคุมสิทธิ์ 3 ระดับ (Owner, Editor, Viewer) พร้อมปลดล็อกให้สมาชิกเข้าใช้งานด้วย Google Account ได้อย่างราบรื่น
+                </p>
+              </div>
+
+              {onOpenGoogleAuthTroubleshoot && (
+                <button
+                  type="button"
+                  onClick={onOpenGoogleAuthTroubleshoot}
+                  className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sky-300 border border-sky-500/30 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shrink-0"
+                >
+                  <KeyRound className="w-4 h-4 text-sky-400" />
+                  <span>ตัวช่วยวินิจฉัย Google Auth</span>
+                </button>
+              )}
+            </div>
+
+            {/* In-tab Feedback Notification */}
+            {memberFeedback && (
+              <div
+                className={`p-3.5 rounded-xl border flex items-center gap-2.5 text-xs font-medium animate-in fade-in ${
+                  memberFeedback.type === 'success'
+                    ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300'
+                    : 'bg-rose-950/60 border-rose-500/40 text-rose-300'
+                }`}
+              >
+                {memberFeedback.type === 'success' ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                )}
+                <span>{memberFeedback.message}</span>
+              </div>
+            )}
+
+            {/* Current User Status Banner */}
+            <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-full bg-emerald-600/20 border border-emerald-500/30 flex items-center justify-center text-emerald-300 font-bold text-sm shrink-0 overflow-hidden">
+                  {user?.photoURL ? (
+                    <img src={user.photoURL} alt="User avatar" className="w-full h-full object-cover" />
+                  ) : user?.email ? (
+                    user.email.slice(0, 2).toUpperCase()
+                  ) : (
+                    <Users className="w-5 h-5 text-slate-400" />
+                  )}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-white text-sm">
+                      {user?.displayName || (user?.email ? user.email.split('@')[0] : 'ผู้ใช้งานบนเครื่อง (Offline Mode)')}
+                    </span>
+                    <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-semibold border ${ROLE_DEFINITIONS[currentUserRole].colorBadge}`}>
+                      {ROLE_DEFINITIONS[currentUserRole].labelThai}
+                    </span>
+                  </div>
+                  <div className="text-xs text-slate-400 mt-0.5">
+                    {user?.email ? user.email : 'ยังไม่ได้เข้าสู่ระบบ Google (สิทธิ์เต็มบนเครื่องนี้)'}
+                  </div>
+                </div>
+              </div>
+
+              {!user ? (
+                <button
+                  type="button"
+                  onClick={onLoginGoogle}
+                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-lg shadow-emerald-600/30 flex items-center gap-2 transition-all cursor-pointer"
+                >
+                  <Globe className="w-4 h-4" />
+                  <span>เข้าสู่ระบบด้วย Google เพื่อซิงค์ทีม</span>
+                </button>
+              ) : (
+                <div className="text-xs text-slate-400 text-right">
+                  <span className="text-slate-500">สิทธิ์ในการแก้ไขระบบ: </span>
+                  <span className={currentUserIsOwner ? 'text-amber-300 font-semibold' : 'text-emerald-300 font-semibold'}>
+                    {currentUserIsOwner ? 'จัดการได้ทุกอย่าง (Full Access)' : 'แก้ไขแปลงที่ดินได้ (Editor Access)'}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Google OAuth & Unverified App Troubleshooting Card */}
+            <div className="p-4 rounded-xl bg-gradient-to-r from-sky-950/40 via-indigo-950/30 to-slate-950/60 border border-sky-500/30 space-y-3">
+              <div className="flex items-start gap-3">
+                <div className="p-2.5 rounded-lg bg-sky-500/20 text-sky-400 border border-sky-500/30 shrink-0 mt-0.5">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div className="space-y-1.5 flex-1">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <h4 className="font-bold text-sky-200 text-sm flex items-center gap-2">
+                      แก้ปัญหา: บัญชี Google คนอื่นล็อกอินไม่ได้ / การเข้าถึงถูกบล็อก (Unverified App)
+                    </h4>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-sky-900/60 text-sky-300 border border-sky-700/50 self-start sm:self-auto">
+                      Firebase Project: gen-lang-client-0888631165
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-300 leading-relaxed">
+                    เมื่อผู้ใช้งานคนอื่นเข้าสู่ระบบ Google แล้วเจอข้อความเตือน <em>"gen-lang-client-0888631165.firebaseapp.com ยังไม่ผ่านกระบวนการยืนยันตัวตนของ Google"</em> เกิดจาก Google มองว่าการขอสิทธิ์ Google Sheets เป็นสิทธิ์ละเอียดอ่อน (Sensitive Scope) ขณะที่โครงการยังเป็น Testing Mode
+                  </p>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1 text-xs">
+                    <div className="p-3 rounded-lg bg-slate-900/90 border border-slate-800 space-y-1">
+                      <div className="font-semibold text-emerald-400 flex items-center gap-1.5">
+                        <CheckCircle2 className="w-3.5 h-3.5" /> 1. การล็อกอินใช้งานทั่วไป (เปิดให้ทุกคนแล้ว)
+                      </div>
+                      <p className="text-[11px] text-slate-400 leading-normal">
+                        ระบบได้ปรับให้การเข้าสู่ระบบแบบมาตรฐาน ขอเฉพาะสิทธิ์ Email และ Profile เท่านั้น ทำให้<strong>อีเมล Google ทุกบัญชีสามารถเข้าสู่ระบบและร่วมจัดการพอร์ตที่ดินได้ทันทีโดยไม่ติดบล็อก</strong>
+                      </p>
+                    </div>
+
+                    <div className="p-3 rounded-lg bg-slate-900/90 border border-slate-800 space-y-1">
+                      <div className="font-semibold text-amber-400 flex items-center gap-1.5">
+                        <Key className="w-3.5 h-3.5" /> 2. กรณีต้องการซิงค์ Google Sheets
+                      </div>
+                      <p className="text-[11px] text-slate-400 leading-normal">
+                        หากต้องการให้สมาชิกคนนั้นใช้ฟีเจอร์ซิงค์ Google Sheets ได้ด้วย เจ้าของระบบเพียงเพิ่มอีเมลนั้นใน <strong>Google Cloud Console -&gt; OAuth consent screen -&gt; Test users</strong>
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2.5 pt-1">
+                    <a
+                      href="https://console.cloud.google.com/apis/credentials/consent?project=gen-lang-client-0888631165"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-3.5 py-1.5 rounded-lg bg-sky-600/30 hover:bg-sky-600/40 text-sky-200 border border-sky-500/40 text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                    >
+                      <span>เปิด Google Cloud Console Test Users</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                    <a
+                      href="https://console.firebase.google.com/project/gen-lang-client-0888631165/authentication/settings"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                    >
+                      <span>ตรวจดู Firebase Authorized Domains</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Access Control Policy Selector */}
+            <div className="p-5 rounded-xl bg-slate-950/70 border border-slate-800 space-y-3">
+              <div>
+                <h4 className="font-bold text-white text-sm flex items-center gap-2">
+                  <Shield className="w-4 h-4 text-emerald-400" />
+                  นโยบายการให้สิทธิ์ผู้ใช้ใหม่ (Access Control Policy)
+                </h4>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  เลือกว่าผู้ใช้งานที่ล็อกอินด้วย Google Account คนอื่น ที่ยังไม่ได้ระบุในตาราง จะได้รับสิทธิ์ระดับใด
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => handleUpdatePolicy('open_team')}
+                  className={`p-4 rounded-xl border text-left transition-all cursor-pointer ${
+                    (formData.accessPolicy || 'open_team') === 'open_team'
+                      ? 'bg-emerald-950/40 border-emerald-500/50 shadow-lg shadow-emerald-950/50'
+                      : 'bg-slate-900 border-slate-800 hover:border-slate-700 opacity-75'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="font-bold text-white text-xs sm:text-sm flex items-center gap-1.5">
+                      <Users className="w-4 h-4 text-emerald-400" />
+                      เปิดสำหรับทุกคนในทีม (Open Team)
+                    </span>
+                    {(formData.accessPolicy || 'open_team') === 'open_team' && (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                        กำลังใช้งาน
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    ทุกบัญชี Google ที่เข้าสู่ระบบจะได้รับสิทธิ์เป็น <strong>ผู้ร่วมจัดการ (Editor)</strong> ทันที สามารถช่วยเพิ่มและแก้ไขแปลงที่ดินได้ เหมาะสำหรับทีมงานภายใน
+                  </p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleUpdatePolicy('whitelist_only')}
+                  className={`p-4 rounded-xl border text-left transition-all cursor-pointer ${
+                    formData.accessPolicy === 'whitelist_only'
+                      ? 'bg-emerald-950/40 border-emerald-500/50 shadow-lg shadow-emerald-950/50'
+                      : 'bg-slate-900 border-slate-800 hover:border-slate-700 opacity-75'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="font-bold text-white text-xs sm:text-sm flex items-center gap-1.5">
+                      <Lock className="w-4 h-4 text-sky-400" />
+                      เฉพาะรายชื่อที่อนุญาต (Whitelist Only)
+                    </span>
+                    {formData.accessPolicy === 'whitelist_only' && (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                        กำลังใช้งาน
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    เฉพาะอีเมลที่ระบุในรายการด้านล่างเท่านั้นจึงจะแก้ไขได้ บัญชีอื่นที่ล็อกอินเข้ามาจะจำกัดสิทธิ์เป็น <strong>ผู้เข้าชม (Viewer)</strong> ดูและพิมพ์ A4 ได้เท่านั้น
+                  </p>
+                </button>
+              </div>
+            </div>
+
+            {/* Add New Team Member Form (Owner only) */}
+            <div className="p-5 rounded-xl bg-slate-950/70 border border-slate-800 space-y-4">
+              <div>
+                <h4 className="font-bold text-white text-sm flex items-center gap-2">
+                  <UserPlus className="w-4 h-4 text-emerald-400" />
+                  เพิ่มสมาชิกและกำหนดสิทธิ์ผู้ใช้งาน (Add / Invite Team Member)
+                </h4>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  ระบุอีเมล Google ของผู้ใช้งานที่ต้องการให้สิทธิ์ เพื่อเข้าถึงข้อมูลพอร์ตที่ดิน
+                </p>
+              </div>
+
+              <form onSubmit={handleAddMember} className="space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                      อีเมล Google (Gmail / Google Workspace) *
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      value={newMemberEmail}
+                      onChange={(e) => setNewMemberEmail(e.target.value)}
+                      placeholder="เช่น colleague@gmail.com"
+                      className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                      ชื่อ / ตำแหน่งสมาชิก (ไม่บังคับ)
+                    </label>
+                    <input
+                      type="text"
+                      value={newMemberName}
+                      onChange={(e) => setNewMemberName(e.target.value)}
+                      placeholder="เช่น คุณสมชาย (ผู้จัดการแปลง)"
+                      className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                      ระดับสิทธิ์การใช้งาน (Role) *
+                    </label>
+                    <select
+                      value={newMemberRole}
+                      onChange={(e) => setNewMemberRole(e.target.value as UserRole)}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs focus:outline-none focus:border-emerald-500 cursor-pointer"
+                    >
+                      <option value="editor">ผู้ร่วมจัดการ / ผู้แก้ไข (Editor) - แนะนำ</option>
+                      <option value="viewer">ผู้เข้าชมอย่างเดียว (Viewer)</option>
+                      <option value="owner">เจ้าของระบบร่วม (Owner)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                      บันทึกช่วยจำ (Notes)
+                    </label>
+                    <input
+                      type="text"
+                      value={newMemberNotes}
+                      onChange={(e) => setNewMemberNotes(e.target.value)}
+                      placeholder="เช่น ฝ่ายรังวัด, บัญชี, ทนาย"
+                      className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-end pt-1">
+                  <button
+                    type="submit"
+                    className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-lg shadow-emerald-600/30 flex items-center gap-2 transition-all cursor-pointer"
+                  >
+                    <UserPlus className="w-4 h-4" />
+                    <span>บันทึกและให้สิทธิ์สมาชิก</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            {/* Authorized Users Table */}
+            <div className="p-5 rounded-xl bg-slate-950/70 border border-slate-800 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="font-bold text-white text-sm flex items-center gap-2">
+                    <UserCheck className="w-4 h-4 text-emerald-400" />
+                    รายชื่อสมาชิกและสิทธิ์ในระบบ ({ (formData.authorizedUsers?.length || 0) + 1 } คน)
+                  </h4>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    คุณสามารถเปลี่ยนสิทธิ์หรือยกเลิกการเข้าถึงของสมาชิกได้ตลอดเวลา
+                  </p>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto rounded-xl border border-slate-800">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-900/90 text-slate-400 border-b border-slate-800">
+                    <tr>
+                      <th className="px-4 py-3 font-semibold">สมาชิก / อีเมล</th>
+                      <th className="px-4 py-3 font-semibold">ระดับสิทธิ์ (Role)</th>
+                      <th className="px-4 py-3 font-semibold">หมายเหตุ</th>
+                      <th className="px-4 py-3 font-semibold">วันที่เพิ่ม</th>
+                      <th className="px-4 py-3 font-semibold text-right">การจัดการ</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/80">
+                    {/* Primary Admin Row (Permanent) */}
+                    <tr className="bg-amber-950/15 hover:bg-amber-950/25 transition-colors">
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center justify-center font-bold text-xs">
+                            👑
+                          </div>
+                          <div>
+                            <div className="font-bold text-white flex items-center gap-1.5">
+                              <span>aspowernetwork@gmail.com</span>
+                              <span className="px-1.5 py-0.2 rounded text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                                ผู้สร้างระบบหลัก
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-slate-400">คุณอภิวัชร์ (Primary Admin & Portfolio Owner)</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                          เจ้าของระบบ (Owner)
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-slate-400">ผู้ดูแลระบบถาวร</td>
+                      <td className="px-4 py-3 text-slate-400">เริ่มต้นระบบ</td>
+                      <td className="px-4 py-3 text-right">
+                        <span className="text-[11px] text-slate-500 italic">สิทธิ์ถาวร</span>
+                      </td>
+                    </tr>
+
+                    {/* Additional Authorized Members */}
+                    {(formData.authorizedUsers || []).map((m) => {
+                      const isSelf = user?.email?.toLowerCase().trim() === m.email.toLowerCase().trim();
+                      return (
+                        <tr key={m.id} className="hover:bg-slate-900/60 transition-colors">
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-8 h-8 rounded-full bg-slate-800 text-slate-300 border border-slate-700 flex items-center justify-center font-bold text-xs">
+                                {m.displayName ? m.displayName.slice(0, 2).toUpperCase() : m.email.slice(0, 2).toUpperCase()}
+                              </div>
+                              <div>
+                                <div className="font-semibold text-white flex items-center gap-1.5">
+                                  <span>{m.email}</span>
+                                  {isSelf && (
+                                    <span className="px-1.5 py-0.2 rounded text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                                      คุณ
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-[11px] text-slate-400">{m.displayName || 'สมาชิกทีม'}</div>
+                              </div>
+                            </div>
+                          </td>
+
+                          <td className="px-4 py-3">
+                            <select
+                              value={m.role}
+                              onChange={(e) => handleChangeMemberRole(m.email, e.target.value as UserRole)}
+                              className="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700 text-xs font-medium text-white focus:outline-none focus:border-emerald-500 cursor-pointer"
+                            >
+                              <option value="owner">เจ้าของระบบ (Owner)</option>
+                              <option value="editor">ผู้ร่วมจัดการ (Editor)</option>
+                              <option value="viewer">ผู้เข้าชม (Viewer)</option>
+                            </select>
+                          </td>
+
+                          <td className="px-4 py-3 text-slate-400">{m.notes || '-'}</td>
+
+                          <td className="px-4 py-3 text-slate-400">
+                            {m.addedAt ? new Date(m.addedAt).toLocaleDateString('th-TH') : '-'}
+                          </td>
+
+                          <td className="px-4 py-3 text-right">
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveMember(m.email)}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-950/40 transition-colors cursor-pointer"
+                              title="ยกเลิกสิทธิ์สมาชิก"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Role Permissions Reference Matrix */}
+            <div className="p-5 rounded-xl bg-slate-950/70 border border-slate-800 space-y-3">
+              <h4 className="font-bold text-white text-sm flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                ตารางสรุปสิทธิ์การใช้งานแต่ละบทบาท (Permission Matrix)
+              </h4>
+
+              <div className="overflow-x-auto rounded-xl border border-slate-800">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-900 text-slate-400 border-b border-slate-800">
+                    <tr>
+                      <th className="px-4 py-2.5 font-semibold">ฟังก์ชันในระบบ</th>
+                      <th className="px-4 py-2.5 font-semibold text-center text-amber-300">เจ้าของระบบ (Owner)</th>
+                      <th className="px-4 py-2.5 font-semibold text-center text-emerald-300">ผู้ร่วมจัดการ (Editor)</th>
+                      <th className="px-4 py-2.5 font-semibold text-center text-sky-300">ผู้เข้าชม (Viewer)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800 text-slate-300">
+                    <tr>
+                      <td className="px-4 py-2.5">ดูข้อมูลแปลงที่ดิน, กรอง, ค้นหา, แผนที่</td>
+                      <td className="px-4 py-2.5 text-center text-emerald-400">✅ ได้</td>
+                      <td className="px-4 py-2.5 text-center text-emerald-400">✅ ได้</td>
+                      <td className="px-4 py-2.5 text-center text-emerald-400">✅ ได้</td>
+                    </tr>
+                    <tr>
+                      <td className="px-4 py-2.5">ส่งออก CSV / JSON และพิมพ์รายงาน A4</td>
+                      <td className="px-4 py-2.5 text-center text-emerald-400">✅ ได้</td>
+                      <td className="px-4 py-2.5 text-center text-emerald-400">✅ ได้</td>
+                      <td className="px-4 py-2.5 text-center text-emerald-400">✅ ได้</td>
+                    </tr>
+                    <tr>
+                      <td className="px-4 py-2.5">เพิ่มแปลงที่ดินใหม่, แก้ไขข้อมูลแปลง</td>
+                      <td className="px-4 py-2.5 text-center text-emerald-400">✅ ได้</td>
+                      <td className="px-4 py-2.5 text-center text-emerald-400">✅ ได้</td>
+                      <td className="px-4 py-2.5 text-center text-rose-400">❌ ไม่ได้</td>
+                    </tr>
+                    <tr>
+                      <td className="px-4 py-2.5">ถ่ายภาพโฉนด (Snap Deed) & อัปโหลดเอกสาร</td>
+                      <td className="px-4 py-2.5 text-center text-emerald-400">✅ ได้</td>
+                      <td className="px-4 py-2.5 text-center text-emerald-400">✅ ได้</td>
+                      <td className="px-4 py-2.5 text-center text-rose-400">❌ ไม่ได้</td>
+                    </tr>
+                    <tr>
+                      <td className="px-4 py-2.5">ลบแปลงที่ดิน</td>
+                      <td className="px-4 py-2.5 text-center text-emerald-400">✅ ได้</td>
+                      <td className="px-4 py-2.5 text-center text-emerald-400">✅ ได้</td>
+                      <td className="px-4 py-2.5 text-center text-rose-400">❌ ไม่ได้</td>
+                    </tr>
+                    <tr>
+                      <td className="px-4 py-2.5">ซิงค์คลาวด์ (Firestore / D1 / Sheets / Drive)</td>
+                      <td className="px-4 py-2.5 text-center text-emerald-400">✅ ได้</td>
+                      <td className="px-4 py-2.5 text-center text-emerald-400">✅ ได้</td>
+                      <td className="px-4 py-2.5 text-center text-rose-400">❌ ไม่ได้</td>
+                    </tr>
+                    <tr>
+                      <td className="px-4 py-2.5">จัดการสิทธิ์สมาชิก & เพิ่มอีเมลทีมงาน</td>
+                      <td className="px-4 py-2.5 text-center text-emerald-400">✅ ได้</td>
+                      <td className="px-4 py-2.5 text-center text-rose-400">❌ ไม่ได้</td>
+                      <td className="px-4 py-2.5 text-center text-rose-400">❌ ไม่ได้</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
 
       {/* Import Status Toast Banner */}
       {importStatus && (

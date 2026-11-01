@@ -9,6 +9,19 @@ export const DEFAULT_SETTINGS: PortfolioSettings = {
   currency: 'บาท',
   fontSize: 'base',
   theme: 'dark',
+  accessPolicy: 'open_team',
+  adminEmails: ['aspowernetwork@gmail.com'],
+  authorizedUsers: [
+    {
+      id: 'usr-admin-1',
+      email: 'aspowernetwork@gmail.com',
+      displayName: 'คุณอภิวัชร์ (เจ้าของระบบ)',
+      role: 'owner',
+      status: 'active',
+      addedAt: new Date().toISOString(),
+      notes: 'ผู้สร้างพอร์ตโฟลิโอและผู้ดูแลสูงสุด',
+    },
+  ],
 };
 
 export const INITIAL_LAND_PLOTS: LandPlot[] = [

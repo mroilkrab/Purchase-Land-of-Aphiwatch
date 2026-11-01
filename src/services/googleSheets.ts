@@ -284,7 +284,11 @@ export const createGoogleSheet = async (
       throw new Error('เซสชัน Google หมดอายุ กรุณาเข้าสู่ระบบ Google ใหม่อีกครั้ง');
     }
     const err = await createRes.json().catch(() => ({}));
-    throw new Error(err.error?.message || `Failed to create sheet: ${createRes.statusText}`);
+    const message = err.error?.message || createRes.statusText;
+    if (createRes.status === 403 || message.includes('insufficient') || message.includes('scope')) {
+      throw new Error('Request had insufficient authentication scopes. (ยังไม่ได้อนุญาตสิทธิ์เข้าถึง Google Sheets & Drive)');
+    }
+    throw new Error(message || `Failed to create sheet: ${createRes.statusText}`);
   }
 
   const createData = await createRes.json();
@@ -317,8 +321,13 @@ export const createGoogleSheet = async (
       throw new Error('เซสชัน Google หมดอายุ กรุณาเข้าสู่ระบบ Google ใหม่อีกครั้ง');
     }
     const err = await updateRes.json().catch(() => ({}));
-    throw new Error(err.error?.message || `Failed to populate sheet data: ${updateRes.statusText}`);
+    const message = err.error?.message || updateRes.statusText;
+    if (updateRes.status === 403 || message.includes('insufficient') || message.includes('scope')) {
+      throw new Error('Request had insufficient authentication scopes. (ยังไม่ได้อนุญาตสิทธิ์เข้าถึง Google Sheets & Drive)');
+    }
+    throw new Error(message || `Failed to populate sheet data: ${updateRes.statusText}`);
   }
+
 
   const updateData = await updateRes.json();
 
@@ -389,8 +398,13 @@ export const updateExistingGoogleSheet = async (
       throw new Error('เซสชัน Google หมดอายุ กรุณาเข้าสู่ระบบ Google ใหม่อีกครั้ง');
     }
     const err = await updateRes.json().catch(() => ({}));
-    throw new Error(err.error?.message || `Failed to update sheet: ${updateRes.statusText}`);
+    const message = err.error?.message || updateRes.statusText;
+    if (updateRes.status === 403 || message.includes('insufficient') || message.includes('scope')) {
+      throw new Error('Request had insufficient authentication scopes. (ยังไม่ได้อนุญาตสิทธิ์เข้าถึง Google Sheets & Drive)');
+    }
+    throw new Error(message || `Failed to update sheet: ${updateRes.statusText}`);
   }
+
 
   const updateData = await updateRes.json();
 

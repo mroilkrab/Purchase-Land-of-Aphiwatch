@@ -31,7 +31,10 @@ export const GoogleAuthTroubleshootModal: React.FC<GoogleAuthTroubleshootModalPr
 }) => {
   const [copiedDomain, setCopiedDomain] = useState(false);
   const [copiedEnv, setCopiedEnv] = useState(false);
-  const [activeTab, setActiveTab] = useState<'firebase' | 'oauth' | 'vercel'>('firebase');
+  const [activeTab, setActiveTab] = useState<'unverified' | 'firebase' | 'oauth' | 'vercel'>(
+    errorInfo?.isUnverifiedApp ? 'unverified' : 'firebase'
+  );
+
 
   if (!isOpen) return null;
 
@@ -126,22 +129,33 @@ VITE_FIREBASE_OAUTH_CLIENT_ID=${activeFirebaseConfig.oAuthClientId || ''}`;
           </div>
 
           {/* Navigation Tabs */}
-          <div className="flex border-b border-slate-800 text-xs gap-2">
+          <div className="flex border-b border-slate-800 text-xs gap-2 overflow-x-auto">
+            <button
+              type="button"
+              onClick={() => setActiveTab('unverified')}
+              className={`pb-2.5 px-3 font-semibold transition-colors border-b-2 cursor-pointer whitespace-nowrap ${
+                activeTab === 'unverified'
+                  ? 'border-sky-500 text-sky-400'
+                  : 'border-transparent text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              ⭐ แก้ "การเข้าถึงถูกบล็อก / Unverified App"
+            </button>
             <button
               type="button"
               onClick={() => setActiveTab('firebase')}
-              className={`pb-2.5 px-3 font-semibold transition-colors border-b-2 cursor-pointer ${
+              className={`pb-2.5 px-3 font-semibold transition-colors border-b-2 cursor-pointer whitespace-nowrap ${
                 activeTab === 'firebase'
                   ? 'border-emerald-500 text-emerald-400'
                   : 'border-transparent text-slate-400 hover:text-slate-200'
               }`}
             >
-              1. เพิ่มใน Firebase Console (สำคัญที่สุด ⭐)
+              1. โดเมน Firebase Console
             </button>
             <button
               type="button"
               onClick={() => setActiveTab('oauth')}
-              className={`pb-2.5 px-3 font-semibold transition-colors border-b-2 cursor-pointer ${
+              className={`pb-2.5 px-3 font-semibold transition-colors border-b-2 cursor-pointer whitespace-nowrap ${
                 activeTab === 'oauth'
                   ? 'border-emerald-500 text-emerald-400'
                   : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -152,19 +166,68 @@ VITE_FIREBASE_OAUTH_CLIENT_ID=${activeFirebaseConfig.oAuthClientId || ''}`;
             <button
               type="button"
               onClick={() => setActiveTab('vercel')}
-              className={`pb-2.5 px-3 font-semibold transition-colors border-b-2 cursor-pointer ${
+              className={`pb-2.5 px-3 font-semibold transition-colors border-b-2 cursor-pointer whitespace-nowrap ${
                 activeTab === 'vercel'
                   ? 'border-emerald-500 text-emerald-400'
                   : 'border-transparent text-slate-400 hover:text-slate-200'
               }`}
             >
-              3. Vercel Env Vars (ทางเลือก)
+              3. Vercel Env Vars
             </button>
           </div>
+
+          {/* Tab 0: Unverified App Fix */}
+          {activeTab === 'unverified' && (
+            <div className="space-y-4">
+              <div className="p-4 rounded-xl bg-sky-950/40 border border-sky-500/30 text-sky-200 text-xs space-y-2">
+                <span className="font-bold flex items-center gap-1.5 text-sky-300 text-sm">
+                  <ShieldCheck className="w-5 h-5 text-sky-400" />
+                  สาเหตุ: "ยังไม่ผ่านกระบวนการยืนยันตัวตนของ Google เวลาล็อคอินอีเมล์อื่น"
+                </span>
+                <p className="text-slate-300 leading-relaxed">
+                  เนื่องจากแอปพลิเคชันของคุณมีการขอสิทธิ์ <strong>Google Sheets</strong> และ <strong>Google Drive</strong> ซึ่ง Google จัดเป็น Sensitive Scopes ขณะที่แอปยังอยู่ในสถานะทดสอบ (Testing Mode) ทาง Google จึงยอมให้เฉพาะอีเมลเจ้าของระบบ และอีเมลที่อยู่ในรายชื่อ <strong>Test Users</strong> ล็อกอินได้เท่านั้น
+                </p>
+              </div>
+
+              <div className="space-y-3 text-xs text-slate-300">
+                <h4 className="font-bold text-white text-sm">แนวทางแก้ไขที่ระบบทำไว้ให้:</h4>
+
+                <div className="p-3.5 rounded-lg bg-slate-800/80 border border-slate-700/80 flex items-start gap-3">
+                  <span className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 font-bold flex items-center justify-center shrink-0">1</span>
+                  <div className="space-y-1">
+                    <p className="font-semibold text-emerald-300">เข้าสู่ระบบโหมดมาตรฐาน (Standard Login) - แก้ไขแล้ว!</p>
+                    <p className="text-slate-300 text-[11px] leading-relaxed">
+                      ระบบได้ปรับให้ปุ่มล็อกอินมาตรฐาน ขอเฉพาะสิทธิ์ Email และ Profile เท่านั้น ทำให้<strong>อีเมล Google ทุกคนสามารถกดล็อกอินเข้าสู่ระบบ ดูข้อมูล และแก้ไขพอร์ตที่ดินได้ทันทีโดยไม่ติดบล็อก</strong>
+                    </p>
+                  </div>
+                </div>
+
+                <div className="p-3.5 rounded-lg bg-slate-800/80 border border-slate-700/80 flex items-start gap-3">
+                  <span className="w-6 h-6 rounded-full bg-amber-500/20 text-amber-400 font-bold flex items-center justify-center shrink-0">2</span>
+                  <div className="space-y-2 flex-1">
+                    <p className="font-semibold text-amber-300">หากต้องการให้สมาชิกคนนั้น "ซิงค์ Google Sheets" ได้ด้วย</p>
+                    <p className="text-slate-300 text-[11px] leading-relaxed">
+                      เจ้าของระบบไปที่ Google Cloud Console แล้วเพิ่มอีเมลของสมาชิกคนนั้นในหัวข้อ <strong>Test users (ผู้ใช้ทดสอบ)</strong>
+                    </p>
+                    <a
+                      href={`https://console.cloud.google.com/apis/credentials/consent?project=${projectId}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-semibold text-xs shadow-sm transition-colors cursor-pointer"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      <span>เปิด Google Cloud Console: OAuth Consent Screen</span>
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Tab 1: Firebase Console (The #1 fix) */}
           {activeTab === 'firebase' && (
             <div className="space-y-4">
+
               <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs space-y-1">
                 <span className="font-bold flex items-center gap-1.5 text-amber-300">
                   <ShieldCheck className="w-4 h-4" /> ทำไมถึงล็อกอินไม่ได้บน Vercel?

@@ -11,10 +11,24 @@ import {
   loadPlotsFromIndexedDB,
   loadSettingsFromIndexedDB
 } from './services/storage';
-import { initAuth, googleSignIn, logoutGoogle, getAccessToken, GoogleAuthErrorInfo, parseGoogleAuthError } from './services/firebaseAuth';
+import { 
+  initAuth, 
+  googleSignIn, 
+  logoutGoogle, 
+  getAccessToken, 
+  getSheetsAccessToken, 
+  hasGrantedSheetsScope, 
+  connectGoogleSheetsScope, 
+  isInsufficientScopesError, 
+  GoogleAuthErrorInfo, 
+  parseGoogleAuthError 
+} from './services/firebaseAuth';
+
 import { createGoogleSheet, updateExistingGoogleSheet } from './services/googleSheets';
 import { LandPlot, PortfolioSettings, AppFontSize } from './types/land';
+import { getUserRole, hasPermission } from './services/rbac';
 import { Navbar } from './components/Navbar';
+
 import { KPIDashboard } from './components/KPIDashboard';
 import { LandTable } from './components/LandTable';
 import { LandMapView } from './components/LandMapView';
@@ -136,8 +150,14 @@ export default function App() {
   };
 
   // Background Auto-sync to Google Sheets on any Add, Edit, or Delete
-  const syncPlotsToGoogleSheet = async (currentPlots: LandPlot[], actionLabel: string) => {
-    const token = await getAccessToken();
+  const syncPlotsToGoogleSheet = async (
+    currentPlots: LandPlot[],
+    actionLabel: string,
+    explicitToken?: string
+  ) => {
+    if (!settings.googleSheetId && !explicitToken) return;
+
+    let token = explicitToken || (await getSheetsAccessToken());
     if (!token) {
       setSheetSyncStatus((prev) => ({
         ...prev,
@@ -162,6 +182,9 @@ export default function App() {
           const res = await updateExistingGoogleSheet(token, currentSheetId, currentPlots, settings);
           spreadsheetUrl = res.spreadsheetUrl;
         } catch (updateErr: any) {
+          if (isInsufficientScopesError(updateErr)) {
+            throw updateErr;
+          }
           console.warn('Update existing sheet failed, attempting fallback create:', updateErr);
           if (
             updateErr.message?.includes('404') ||
@@ -198,25 +221,92 @@ export default function App() {
       showToast(`✅ ${actionLabel} และอัปเดต Google Sheet เรียบร้อยแล้ว!`);
     } catch (err: any) {
       console.error('Google Sheets sync error:', err);
+      const isScopeErr = isInsufficientScopesError(err);
+      const errMsg = isScopeErr
+        ? 'บัญชี Google ยังไม่ได้อนุญาตสิทธิ์ Google Sheets (กดยืนยันสิทธิ์ Google Sheets เพื่อเริ่มการซิงค์)'
+        : (err.message || 'โปรดตรวจสอบการเชื่อมต่อ');
+
       setSheetSyncStatus((prev) => ({
         ...prev,
         status: 'error',
-        message: `ไม่สามารถอัปเดต Google Sheet ได้: ${err.message || 'โปรดตรวจสอบการเชื่อมต่อ'}`,
+        message: isScopeErr
+          ? '⚠️ ยังไม่ได้รับสิทธิ์ Google Sheets: กรุณากดปุ่ม "เชื่อมต่อสิทธิ์ Google Sheets"'
+          : `ไม่สามารถอัปเดต Google Sheet ได้: ${errMsg}`,
       }));
-      showToast(`⚠️ ${actionLabel} ในระบบแล้ว แต่ซิงค์ Google Sheet ไม่สำเร็จ: ${err.message || ''}`);
+      showToast(`⚠️ ${actionLabel} ในระบบแล้ว แต่ซิงค์ Google Sheet ไม่สำเร็จ: ${errMsg}`);
     } finally {
       setIsSyncingSheet(false);
     }
   };
 
   const handleManualSyncSheet = async () => {
-    const token = await getAccessToken();
-    if (!token) {
-      await handleLogin();
-      return;
+    try {
+      setIsSyncingSheet(true);
+      if (!user) {
+        await handleLogin();
+        return;
+      }
+
+      // Check if we have granted sheets scope yet
+      let token = await getSheetsAccessToken();
+      const hasScope = hasGrantedSheetsScope();
+
+      // If user hasn't granted sheets scope yet, prompt directly on this click!
+      if (!token || !hasScope) {
+        showToast('🔑 กรุณากดยืนยันอนุญาตสิทธิ์ Google Sheets ในหน้าต่างป๊อปอัป...');
+        const authRes = await googleSignIn({ requestSheetsScope: true });
+        token = authRes?.accessToken || null;
+        if (!token) {
+          setIsSyncingSheet(false);
+          return;
+        }
+      }
+
+      try {
+        await syncPlotsToGoogleSheet(plots, 'ซิงค์ข้อมูลทั้งหมด', token);
+      } catch (err: any) {
+        if (isInsufficientScopesError(err)) {
+          showToast('🔑 บัญชียังไม่ได้อนุญาตสิทธิ์ Google Sheets: กำลังเปิดหน้าต่างขอสิทธิ์...');
+          const authRes = await googleSignIn({ requestSheetsScope: true });
+          if (authRes?.accessToken) {
+            await syncPlotsToGoogleSheet(plots, 'ซิงค์ข้อมูลทั้งหมด', authRes.accessToken);
+          }
+        } else {
+          throw err;
+        }
+      }
+    } catch (err: any) {
+      console.error('Manual sync error:', err);
+      const parsed = parseGoogleAuthError(err);
+      if (parsed.isUnverifiedApp) {
+        setAuthErrorInfo(parsed);
+        setIsAuthTroubleshootOpen(true);
+      }
+    } finally {
+      setIsSyncingSheet(false);
     }
-    await syncPlotsToGoogleSheet(plots, 'ซิงค์ข้อมูลทั้งหมด');
   };
+
+  const handleConnectSheetsScope = async () => {
+    try {
+      showToast('🔑 กำลังเปิดหน้าต่างยืนยันสิทธิ์ Google Sheets & Drive...');
+      const token = await connectGoogleSheetsScope();
+      if (token) {
+        showToast('✅ เชื่อมต่อและอนุญาตสิทธิ์ Google Sheets สำเร็จ! กำลังเริ่มซิงค์ข้อมูล...');
+        await syncPlotsToGoogleSheet(plots, 'เชื่อมต่อสิทธิ์สำเร็จ ซิงค์ข้อมูล', token);
+      }
+    } catch (err: any) {
+      console.error('Connect sheets scope error:', err);
+      const parsed = parseGoogleAuthError(err);
+      if (parsed.isUnverifiedApp) {
+        setAuthErrorInfo(parsed);
+        setIsAuthTroubleshootOpen(true);
+      } else if (!parsed.isCancelled) {
+        showToast(`⚠️ ขอสิทธิ์ Google Sheets ไม่สำเร็จ: ${parsed.title}`);
+      }
+    }
+  };
+
 
   // Auth listener
   useEffect(() => {
@@ -265,8 +355,14 @@ export default function App() {
     }
   };
 
-  // Plot operations
+  // Plot operations with RBAC permission enforcement
+  const currentUserRole = getUserRole(user, settings);
+
   const handleSavePlot = (savedPlot: LandPlot) => {
+    if (!hasPermission(currentUserRole, 'canEdit')) {
+      showToast('⚠️ สิทธิ์ของคุณคือ ผู้เข้าชม (Viewer) - ดูและพิมพ์รายงานได้เท่านั้น ไม่สามารถแก้ไขข้อมูลได้');
+      return;
+    }
     let updatedList: LandPlot[];
     const exists = plots.some((p) => p.id === savedPlot.id);
 
@@ -296,6 +392,10 @@ export default function App() {
   };
 
   const handleDeletePlot = (plotId: string) => {
+    if (!hasPermission(currentUserRole, 'canDelete')) {
+      showToast('⚠️ สิทธิ์ของคุณคือ ผู้เข้าชม (Viewer) - ไม่สามารถลบแปลงที่ดินได้');
+      return;
+    }
     const targetPlot = plots.find((p) => p.id === plotId);
     const updated = plots.filter((p) => p.id !== plotId);
     setPlots(updated);
@@ -310,6 +410,10 @@ export default function App() {
   };
 
   const handleDuplicatePlot = (plot: LandPlot) => {
+    if (!hasPermission(currentUserRole, 'canCreate')) {
+      showToast('⚠️ สิทธิ์ของคุณคือ ผู้เข้าชม (Viewer) - ไม่สามารถเพิ่มหรือทำสำเนาแปลงที่ดินได้');
+      return;
+    }
     const nextOrder = Math.max(...plots.map((p) => p.orderNumber), 0) + 1;
     const duplicated: LandPlot = {
       ...plot,
@@ -332,6 +436,7 @@ export default function App() {
   };
 
   const handleResetData = () => {
+
     const { plots: defPlots, settings: defSettings } = resetDataToDefault();
     setPlots(defPlots);
     setSettings(defSettings);
@@ -361,7 +466,7 @@ export default function App() {
   const nextOrderNumber = Math.max(...plots.map((p) => p.orderNumber || 0), 0) + 1;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-['Prompt',sans-serif] overflow-x-hidden max-w-full app-container transition-colors duration-200">
+    <div className="min-h-screen bg-[#0c121e] text-slate-100 flex flex-col font-['Prompt',sans-serif] overflow-x-hidden max-w-full app-container transition-colors duration-200">
       {/* Navigation Bar */}
       <Navbar
         activeTab={activeTab}
@@ -370,6 +475,10 @@ export default function App() {
         onLogin={handleLogin}
         onLogout={handleLogout}
         onAddNewPlot={() => {
+          if (!hasPermission(currentUserRole, 'canCreate')) {
+            showToast('⚠️ สิทธิ์ของคุณคือ ผู้เข้าชม (Viewer) - ดูและพิมพ์รายงาน A4 ได้เท่านั้น');
+            return;
+          }
           setEditingPlot(null);
           setIsFormOpen(true);
         }}
@@ -411,12 +520,20 @@ export default function App() {
             initialStatusFilter={tableStatusFilter}
             onSelectPlot={(plot) => setSelectedPlotForDetail(plot)}
             onEditPlot={(plot) => {
+              if (!hasPermission(currentUserRole, 'canEdit')) {
+                showToast('⚠️ สิทธิ์ของคุณคือ ผู้เข้าชม (Viewer) - ดูและพิมพ์รายงานได้เท่านั้น');
+                return;
+              }
               setEditingPlot(plot);
               setIsFormOpen(true);
             }}
             onDeletePlot={handleDeletePlot}
             onDuplicatePlot={handleDuplicatePlot}
             onAddNewPlot={() => {
+              if (!hasPermission(currentUserRole, 'canCreate')) {
+                showToast('⚠️ สิทธิ์ของคุณคือ ผู้เข้าชม (Viewer) - ไม่สามารถเพิ่มแปลงที่ดินได้');
+                return;
+              }
               setEditingPlot(null);
               setIsFormOpen(true);
             }}
@@ -428,8 +545,12 @@ export default function App() {
             isGoogleAuthed={!!user}
             onLoginGoogle={handleLogin}
             settings={settings}
+            userRole={currentUserRole}
+            onConnectSheetsScope={handleConnectSheetsScope}
           />
         )}
+
+
 
         {activeTab === 'map' && (
           <LandMapView

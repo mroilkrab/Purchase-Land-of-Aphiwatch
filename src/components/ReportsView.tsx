@@ -416,7 +416,7 @@ export const RevenueForecastVsRealizedChart: React.FC<RevenueForecastChartProps>
             </h3>
             <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
               paperPrintMode
-                ? 'bg-slate-100 text-slate-900 border-slate-300'
+                ? 'bg-white text-slate-900 border-slate-400'
                 : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
             }`}>
               D3 Engine Live
@@ -430,15 +430,15 @@ export const RevenueForecastVsRealizedChart: React.FC<RevenueForecastChartProps>
         {/* Dynamic Realized Counter Pill */}
         <div className={`px-3 py-1.5 rounded-xl border flex items-center gap-2 text-xs font-mono ${
           paperPrintMode 
-            ? 'bg-slate-50 border-slate-400 text-slate-950' 
+            ? 'bg-white border-slate-400 text-slate-950' 
             : 'bg-slate-800/80 border-slate-700 text-slate-200'
         }`}>
           <span className="font-semibold">ขายแล้ว:</span>
           <span className={`font-bold ${paperPrintMode ? 'text-slate-950 underline' : 'text-emerald-400'}`}>
             {totals.soldCount} / {totals.totalCount} แปลง
           </span>
-          <span className={`text-[11px] font-bold px-1.5 py-0.2 rounded ${
-            totals.pct > 0 ? (paperPrintMode ? 'bg-slate-200 text-slate-950' : 'bg-emerald-500/20 text-emerald-300') : 'text-slate-500'
+          <span className={`text-[11px] font-bold px-1.5 py-0.2 rounded border ${
+            totals.pct > 0 ? (paperPrintMode ? 'bg-white border-slate-400 text-slate-950' : 'bg-emerald-500/20 text-emerald-300 border-transparent') : 'text-slate-500 border-transparent'
           }`}>
             {totals.pct.toFixed(1)}% ของเป้า
           </span>
@@ -448,7 +448,7 @@ export const RevenueForecastVsRealizedChart: React.FC<RevenueForecastChartProps>
       {/* KPI 3-Column Summary Strip */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
         <div className={`p-3 rounded-lg border ${
-          paperPrintMode ? 'bg-slate-50 border-slate-300' : 'bg-slate-950/60 border-slate-800'
+          paperPrintMode ? 'bg-white border-slate-300' : 'bg-slate-950/60 border-slate-800'
         }`}>
           <div className="flex items-center justify-between text-xs">
             <span className={paperPrintMode ? 'text-slate-700 font-semibold' : 'text-sky-400 font-medium'}>
@@ -466,7 +466,7 @@ export const RevenueForecastVsRealizedChart: React.FC<RevenueForecastChartProps>
         </div>
 
         <div className={`p-3 rounded-lg border ${
-          paperPrintMode ? 'bg-slate-50 border-slate-300' : 'bg-slate-950/60 border-slate-800'
+          paperPrintMode ? 'bg-white border-slate-300' : 'bg-slate-950/60 border-slate-800'
         }`}>
           <div className="flex items-center justify-between text-xs">
             <span className={paperPrintMode ? 'text-slate-900 font-bold' : 'text-emerald-400 font-medium'}>
@@ -484,7 +484,7 @@ export const RevenueForecastVsRealizedChart: React.FC<RevenueForecastChartProps>
         </div>
 
         <div className={`p-3 rounded-lg border ${
-          paperPrintMode ? 'bg-slate-50 border-slate-300' : 'bg-slate-950/60 border-slate-800'
+          paperPrintMode ? 'bg-white border-slate-300' : 'bg-slate-950/60 border-slate-800'
         }`}>
           <div className="flex items-center justify-between text-xs">
             <span className={paperPrintMode ? 'text-slate-700 font-semibold' : 'text-amber-400 font-medium'}>
@@ -527,8 +527,8 @@ export const RevenueForecastVsRealizedChart: React.FC<RevenueForecastChartProps>
               <span>#{hoveredPoint.orderNumber} {hoveredPoint.title}</span>
               <span className={`px-2 py-0.5 rounded text-[10px] ${
                 hoveredPoint.isSold 
-                  ? (paperPrintMode ? 'bg-slate-200 text-slate-950' : 'bg-emerald-500/20 text-emerald-400')
-                  : (paperPrintMode ? 'bg-slate-100 text-slate-700' : 'bg-slate-800 text-slate-400')
+                  ? (paperPrintMode ? 'bg-white border border-slate-400 text-slate-950 font-bold' : 'bg-emerald-500/20 text-emerald-400')
+                  : (paperPrintMode ? 'bg-white border border-slate-300 text-slate-700' : 'bg-slate-800 text-slate-400')
               }`}>
                 {hoveredPoint.isSold ? 'ขายแล้ว (Sold)' : 'ถือครอง (Holding)'}
               </span>
@@ -1281,7 +1281,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         {/* Formal Executive PDF Header */}
         <div className={`p-5 rounded-2xl border shadow-md flex flex-col md:flex-row md:items-center justify-between gap-4 ${
           paperPrintMode
-            ? 'bg-slate-50 border-2 border-slate-900 text-slate-900'
+            ? 'bg-white border-2 border-slate-900 text-slate-900'
             : 'bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 border-slate-750'
         }`}>
           <div className="space-y-1">
@@ -1357,7 +1357,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 จากยอดขาย: {formatCurrency(metrics.totalRealizedSales)}
               </span>
               {paperPrintMode && metrics.totalRealizedProfit > 0 && (
-                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 border border-slate-400 text-slate-950">
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-white border border-slate-400 text-slate-950">
                   รับรู้จริง
                 </span>
               )}
@@ -1482,7 +1482,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                     key={item.type} 
                     className={`space-y-1.5 p-3.5 rounded-lg border ${
                       paperPrintMode
-                        ? 'bg-slate-50 border-slate-300'
+                        ? 'bg-white border-slate-300'
                         : 'bg-slate-950/60 border-slate-800/80'
                     }`}
                   >
@@ -1508,7 +1508,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                     {/* High-Contrast Progress Bar: light track with dark charcoal fill on paper */}
                     <div className={`w-full h-3 rounded-full overflow-hidden flex print-progress-track ${
                       paperPrintMode
-                        ? 'bg-slate-200 border border-slate-300'
+                        ? 'bg-white border border-slate-400'
                         : 'bg-slate-800'
                     }`}>
                       <div
@@ -1534,7 +1534,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               : 'bg-slate-900 border-slate-800 shadow-xl'
           }`}>
             <div className={`p-4 border-b flex items-center justify-between ${
-              paperPrintMode ? 'bg-slate-100 border-slate-300' : 'bg-slate-800/40 border-slate-800'
+              paperPrintMode ? 'bg-white border-slate-300' : 'bg-slate-800/40 border-slate-800'
             }`}>
               <h3 className={`font-bold text-sm ${paperPrintMode ? 'text-slate-950' : 'text-white'}`}>
                 ตารางสรุปผลกำไร-ขาดทุนแยกตามประเภทที่ดินอย่างละเอียด
@@ -1549,7 +1549,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 <thead>
                   <tr className={`border-b font-bold ${
                     paperPrintMode
-                      ? 'bg-slate-100 border-slate-400 text-slate-950'
+                      ? 'bg-white border-slate-400 text-slate-950'
                       : 'bg-slate-800/70 border-slate-700 text-slate-300'
                   }`}>
                     <th className="py-3 px-3">ประเภทที่ดิน</th>
@@ -1558,7 +1558,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                     <th className="py-3 px-3 text-right">ราคาซื้อที่ดิน</th>
                     <th className="py-3 px-3 text-right">ค่าธรรมเนียม/รังวัด</th>
                     <th className={`py-3 px-3 text-right font-bold ${
-                      paperPrintMode ? 'text-black bg-slate-200/80' : 'text-white bg-slate-800/60'
+                      paperPrintMode ? 'text-black bg-white' : 'text-white bg-slate-800/60'
                     }`}>
                       ต้นทุนรวมสุทธิ
                     </th>
@@ -1599,7 +1599,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                           {formatCurrency(row.otherCosts)}
                         </td>
                         <td className={`py-3 px-3 text-right font-mono font-bold ${
-                          paperPrintMode ? 'text-black bg-slate-100' : 'text-white bg-slate-800/30'
+                          paperPrintMode ? 'text-black bg-white' : 'text-white bg-slate-800/30'
                         }`}>
                           {formatCurrency(row.totalCost)}
                         </td>
@@ -1621,7 +1621,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 </tbody>
                 <tfoot className={`font-bold border-t-2 ${
                   paperPrintMode
-                    ? 'bg-slate-100 border-slate-500 text-slate-950'
+                    ? 'bg-white border-slate-500 text-slate-950'
                     : 'bg-slate-800/90 border-slate-700 text-slate-100'
                 }`}>
                   <tr>
@@ -1638,7 +1638,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                       {formatCurrency(metrics.totalCost - metrics.totalPurchase)}
                     </td>
                     <td className={`py-3 px-3 text-right font-mono text-sm ${
-                      paperPrintMode ? 'text-black font-extrabold bg-slate-200/80' : 'text-white bg-slate-800'
+                      paperPrintMode ? 'text-black font-extrabold bg-white' : 'text-white bg-slate-800'
                     }`}>
                       {formatCurrency(metrics.totalCost)}
                     </td>
@@ -1745,7 +1745,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               : 'bg-slate-900 border-slate-800 shadow-xl'
           }`}>
             <div className={`p-4 border-b flex items-center justify-between ${
-              paperPrintMode ? 'bg-slate-100 border-slate-300' : 'bg-slate-800/40 border-slate-800'
+              paperPrintMode ? 'bg-white border-slate-300' : 'bg-slate-800/40 border-slate-800'
             }`}>
               <h3 className={`font-bold text-sm ${paperPrintMode ? 'text-slate-950' : 'text-white'}`}>
                 ตารางสรุปผลกำไร-ขาดทุนย้อนหลังแยกตามปี พ.ศ.
@@ -1760,7 +1760,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 <thead>
                   <tr className={`border-b font-bold ${
                     paperPrintMode
-                      ? 'bg-slate-100 border-slate-400 text-slate-950'
+                      ? 'bg-white border-slate-400 text-slate-950'
                       : 'bg-slate-800/70 border-slate-700 text-slate-300'
                   }`}>
                     <th className="py-3 px-3">ช่วงเวลา (ปี พ.ศ.)</th>
@@ -1769,7 +1769,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                     <th className="py-3 px-3 text-right">เงินซื้อที่ดิน</th>
                     <th className="py-3 px-3 text-right">ค่าธรรมเนียม/รังวัด</th>
                     <th className={`py-3 px-3 text-right font-bold ${
-                      paperPrintMode ? 'text-black bg-slate-200/80' : 'text-white bg-slate-800/60'
+                      paperPrintMode ? 'text-black bg-white' : 'text-white bg-slate-800/60'
                     }`}>
                       ต้นทุนรวมสุทธิ
                     </th>
@@ -1810,7 +1810,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                           {formatCurrency(t.otherCosts)}
                         </td>
                         <td className={`py-3 px-3 text-right font-mono font-bold ${
-                          paperPrintMode ? 'text-black bg-slate-100' : 'text-white bg-slate-800/30'
+                          paperPrintMode ? 'text-black bg-white' : 'text-white bg-slate-800/30'
                         }`}>
                           {formatCurrency(t.totalCost)}
                         </td>
@@ -1946,7 +1946,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         {/* Strategic Report Takeaways & Insights */}
         <div className={`p-5 rounded-xl border space-y-3 avoid-break ${!reportSections.insights ? 'print:hidden' : ''} ${
           paperPrintMode
-            ? 'bg-slate-50 border-2 border-slate-300 text-slate-800'
+            ? 'bg-white border-2 border-slate-300 text-slate-800'
             : 'bg-gradient-to-r from-slate-900 via-slate-950 to-slate-900 border-slate-800 text-slate-300'
         }`}>
           <h4 className={`font-bold text-xs sm:text-sm flex items-center gap-2 ${paperPrintMode ? 'text-slate-950' : 'text-white'}`}>
@@ -1984,7 +1984,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         {/* Formal Executive Footer for Printable PDF */}
         <div className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between text-xs gap-2 avoid-break ${
           paperPrintMode
-            ? 'bg-slate-50 border border-slate-300 text-slate-800'
+            ? 'bg-white border border-slate-300 text-slate-800'
             : 'bg-slate-900/60 border-slate-800/80 text-slate-400'
         }`}>
           <div className="flex items-center gap-2">

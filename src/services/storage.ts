@@ -54,13 +54,13 @@ export const loadPlotsFromStorage = (): LandPlot[] => {
         return [];
       }
       return parsed.map((p: LandPlot) => {
-        if (!p.latitude || !p.longitude) {
-          const match = INITIAL_LAND_PLOTS.find((d) => d.id === p.id || d.orderNumber === p.orderNumber);
-          if (match?.latitude && match?.longitude) {
-            return { ...p, latitude: match.latitude, longitude: match.longitude };
-          }
-        }
-        return p;
+        const match = INITIAL_LAND_PLOTS.find((d) => d.id === p.id || d.orderNumber === p.orderNumber);
+        return {
+          ...p,
+          latitude: p.latitude || match?.latitude,
+          longitude: p.longitude || match?.longitude,
+          activityLog: p.activityLog && p.activityLog.length > 0 ? p.activityLog : match?.activityLog,
+        };
       });
     }
     return INITIAL_LAND_PLOTS;
@@ -131,18 +131,43 @@ export const resetDataToDefault = (): { plots: LandPlot[]; settings: PortfolioSe
   return { plots: INITIAL_LAND_PLOTS, settings: DEFAULT_SETTINGS };
 };
 
-export const exportToJsonFile = (plots: LandPlot[], settings: PortfolioSettings) => {
+export const exportToJsonFile = (plots: LandPlot[], settings: PortfolioSettings): { filename: string; totalPlots: number } => {
+  const now = new Date();
+  const dateFormatted = now.toISOString().slice(0, 10);
+  const timeFormatted = now.toTimeString().slice(0, 8).replace(/:/g, '');
+  const filename = `land_portfolio_backup_${dateFormatted}_${timeFormatted}.json`;
+
+  const totalCostSum = plots.reduce((acc, p) => acc + (p.totalCost || 0), 0);
+  const totalAreaSqWahSum = plots.reduce((acc, p) => acc + (p.totalSqWah || 0), 0);
+
   const data = {
-    exportDate: new Date().toISOString(),
-    version: '1.0',
+    appId: 'land_portfolio_v1',
+    version: '2.0',
+    exportTimestamp: now.toISOString(),
+    exportDateThai: now.toLocaleString('th-TH'),
+    metadata: {
+      totalPlots: plots.length,
+      holdingPlots: plots.filter((p) => p.status === 'holding').length,
+      soldPlots: plots.filter((p) => p.status === 'sold').length,
+      totalCost: totalCostSum,
+      totalAreaSqWah: totalAreaSqWahSum,
+      portfolioTitle: settings.portfolioTitle || 'ระบบจัดการพอร์ตที่ดิน',
+      ownerName: settings.ownerName || 'อภิวัชร์',
+    },
     settings,
     plots,
   };
-  const jsonStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(data, null, 2));
+
+  const jsonStr = JSON.stringify(data, null, 2);
+  const blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
   const dlAnchor = document.createElement('a');
-  dlAnchor.setAttribute('href', jsonStr);
-  dlAnchor.setAttribute('download', `land_portfolio_backup_${new Date().toISOString().slice(0, 10)}.json`);
+  dlAnchor.setAttribute('href', url);
+  dlAnchor.setAttribute('download', filename);
   dlAnchor.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+  return { filename, totalPlots: plots.length };
 };
 
 export const exportToCsvFile = (plots: LandPlot[], settings: PortfolioSettings) => {

@@ -103,7 +103,23 @@ export interface LandPlot {
   documentChecklist?: DocumentChecklistRecord;
   driveFolderId?: string; // Google Drive folder ID for this specific plot
   driveFolderWebViewLink?: string; // Web URL to open the Google Drive folder directly
+  activityLog?: PlotActivityLogItem[]; // บันทึกประวัติกิจกรรมและการเปลี่ยนสถานะของแปลง
+  statusHistory?: PlotActivityLogItem[]; // บันทึกประวัติสถานะย้อนหลัง
   updatedAt: string;
+}
+
+export interface PlotActivityLogItem {
+  id: string;
+  action: 'status_change' | 'create' | 'update' | 'document_upload' | 'note_added' | 'other';
+  type?: string;
+  fromStatus?: LandStatus | 'draft' | string;
+  toStatus?: LandStatus | 'draft' | string;
+  status?: LandStatus | 'draft' | string;
+  timestamp: string; // ISO string e.g. "2026-10-22T08:15:00.000Z" หรือ วันที่ พ.ศ.
+  user?: string;
+  userName?: string;
+  note?: string;
+  details?: string;
 }
 
 export type LandTaxUsageType = 

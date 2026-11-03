@@ -17,6 +17,25 @@ export const triggerPrint = (orientation: 'portrait' | 'landscape' = 'portrait')
         size: A4 ${orientation} !important;
         margin: ${margin} !important;
       }
+      /* Force pure white background for all elements and disable background graphics */
+      *, *::before, *::after {
+        -webkit-print-color-adjust: economy !important;
+        print-color-adjust: economy !important;
+        box-shadow: none !important;
+        text-shadow: none !important;
+      }
+      html, body, #root, .app-container, main, div, section, article, table, thead, tbody, tfoot, tr, th, td, p, span, h1, h2, h3, h4,
+      [class*="bg-"], [class*="from-"], [class*="via-"], [class*="to-"] {
+        background: #ffffff !important;
+        background-color: #ffffff !important;
+        background-image: none !important;
+        color: #000000 !important;
+      }
+      table, th, td {
+        background: #ffffff !important;
+        background-color: #ffffff !important;
+        border-color: #94a3b8 !important;
+      }
     }
   `;
   document.documentElement.setAttribute('data-print-orientation', orientation);

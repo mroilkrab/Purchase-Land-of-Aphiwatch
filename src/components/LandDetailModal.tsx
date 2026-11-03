@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import L from 'leaflet';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
@@ -46,7 +46,11 @@ import {
   Upload,
   Printer,
   Receipt,
-  Scale
+  Scale,
+  History,
+  Milestone,
+  ArrowRight,
+  Lock
 } from 'lucide-react';
 import { User } from 'firebase/auth';
 import { 
@@ -57,7 +61,8 @@ import {
   QuickNoteTag, 
   LandPlotImage,
   DocumentChecklistCategory,
-  LandTaxUsageType
+  LandTaxUsageType,
+  PlotActivityLogItem
 } from '../types/land';
 import { formatCurrency, formatThaiArea, calculatePlotHoldingInfo } from '../services/storage';
 import { compressImageForStorage } from '../services/dbStorage';
@@ -220,6 +225,304 @@ const QUICK_TAG_OPTIONS: { tag: QuickNoteTag; label: string; bg: string; text: s
   { tag: 'general', label: 'ทั่วไป', bg: 'bg-slate-700/40', text: 'text-slate-300' },
 ];
 
+export interface StatusTimelineEvent {
+  id: string;
+  stageKey: 'draft' | 'holding' | 'for_sale' | 'consignment' | 'sold';
+  label: string;
+  labelEn: string;
+  fromStatus?: string;
+  toStatus?: string;
+  timestamp: string;
+  rawTimestamp?: string;
+  author?: string;
+  notes?: string;
+  isCurrent: boolean;
+  isCompleted: boolean;
+  badgeBg: string;
+  badgeText: string;
+  badgeBorder: string;
+  dotBg: string;
+}
+
+const STATUS_METADATA: Record<
+  'draft' | LandStatus,
+  {
+    label: string;
+    labelEn: string;
+    badgeBg: string;
+    badgeText: string;
+    badgeBorder: string;
+    dotBg: string;
+    description: string;
+  }
+> = {
+  draft: {
+    label: 'ร่างข้อมูลแปลง (Draft)',
+    labelEn: 'Draft / Setup',
+    badgeBg: 'bg-slate-700/40',
+    badgeText: 'text-slate-300',
+    badgeBorder: 'border-slate-600',
+    dotBg: 'bg-slate-500',
+    description: 'บันทึกข้อมูลแปลงเริ่มต้นลงระบบและสำรวจเอกสารสิทธิ์',
+  },
+  holding: {
+    label: 'เข้าสู่พอร์ต / ถือครอง (Holding)',
+    labelEn: 'Holding',
+    badgeBg: 'bg-emerald-500/20',
+    badgeText: 'text-emerald-300',
+    badgeBorder: 'border-emerald-500/30',
+    dotBg: 'bg-emerald-500',
+    description: 'โอนกรรมสิทธิ์และเริ่มถือครองที่ดินในพอร์ตการลงทุน',
+  },
+  for_sale: {
+    label: 'กำลังประกาศขาย (For Sale)',
+    labelEn: 'For Sale',
+    badgeBg: 'bg-cyan-500/20',
+    badgeText: 'text-cyan-300',
+    badgeBorder: 'border-cyan-500/30',
+    dotBg: 'bg-cyan-500',
+    description: 'เปิดทำการตลาด เสนอขายผ่านนายหน้าหรือช่องทางออนไลน์',
+  },
+  consignment: {
+    label: 'ติดมัดจำ / ขายฝาก (Consignment)',
+    labelEn: 'Consignment',
+    badgeBg: 'bg-amber-500/20',
+    badgeText: 'text-amber-300',
+    badgeBorder: 'border-amber-500/30',
+    dotBg: 'bg-amber-500',
+    description: 'จดทะเบียนสัญญาขายฝากที่ดิน หรือสัญญาจะซื้อจะขายวางเงินมัดจำ',
+  },
+  sold: {
+    label: 'ปิดการขายสำเร็จ (Sold)',
+    labelEn: 'Sold',
+    badgeBg: 'bg-rose-500/20',
+    badgeText: 'text-rose-300',
+    badgeBorder: 'border-rose-500/30',
+    dotBg: 'bg-rose-500',
+    description: 'โอนกรรมสิทธิ์ ณ สำนักงานที่ดิน และรับเงินสุทธิครบถ้วน',
+  },
+};
+
+const formatTimelineDate = (dateStr?: string): string => {
+  if (!dateStr || dateStr === '-') return 'ไม่ระบุวันเวลา';
+  if (dateStr.includes('T') || dateStr.includes('Z')) {
+    try {
+      const d = new Date(dateStr);
+      if (!isNaN(d.getTime())) {
+        return (
+          d.toLocaleDateString('th-TH', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+          }) + ' น.'
+        );
+      }
+    } catch {}
+  }
+  const parts = dateStr.split(/[/-]/);
+  if (parts.length === 3) {
+    const day = parts[0];
+    const month = Number(parts[1]);
+    const year = parts[2];
+    const thaiMonths = [
+      '', 'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
+      'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'
+    ];
+    const mName = thaiMonths[month] || parts[1];
+    return `${day} ${mName} ${year}`;
+  }
+  return dateStr;
+};
+
+const buildPlotStatusTimeline = (
+  plot: LandPlot,
+  settings?: PortfolioSettings
+): StatusTimelineEvent[] => {
+  const events: StatusTimelineEvent[] = [];
+  const currentStatus = plot.status;
+
+  // 1. Check if plot has activityLog or statusHistory
+  const rawLogs = (plot.activityLog || plot.statusHistory || []).filter(
+    (item) => item.action === 'status_change' || item.action === 'create' || item.toStatus || item.status
+  );
+
+  if (rawLogs.length > 0) {
+    const sortedLogs = [...rawLogs].sort((a, b) => {
+      const tA = new Date(a.timestamp).getTime() || 0;
+      const tB = new Date(b.timestamp).getTime() || 0;
+      return tA - tB;
+    });
+
+    const hasDraft = sortedLogs.some(
+      (l) => l.action === 'create' || l.toStatus === 'draft' || l.fromStatus === 'draft'
+    );
+    if (!hasDraft) {
+      events.push({
+        id: `timeline-draft-init-${plot.id}`,
+        stageKey: 'draft',
+        label: STATUS_METADATA.draft.label,
+        labelEn: STATUS_METADATA.draft.labelEn,
+        toStatus: 'draft',
+        timestamp: formatTimelineDate(plot.purchaseDate),
+        rawTimestamp: plot.purchaseDate,
+        author: settings?.ownerName || 'คุณอภิวัชร์',
+        notes: 'สร้างแปลงที่ดินและกรอกข้อมูลเบื้องต้น (Draft / Initial Setup)',
+        isCurrent: false,
+        isCompleted: true,
+        badgeBg: STATUS_METADATA.draft.badgeBg,
+        badgeText: STATUS_METADATA.draft.badgeText,
+        badgeBorder: STATUS_METADATA.draft.badgeBorder,
+        dotBg: STATUS_METADATA.draft.dotBg,
+      });
+    }
+
+    sortedLogs.forEach((log, idx) => {
+      const stageKey = (log.toStatus || log.status || (log.action === 'create' ? 'draft' : 'holding')) as 'draft' | LandStatus;
+      const meta = STATUS_METADATA[stageKey] || STATUS_METADATA.holding;
+      const isCurrentStage = stageKey === currentStatus && idx === sortedLogs.length - 1;
+
+      events.push({
+        id: log.id || `timeline-${idx}-${stageKey}`,
+        stageKey,
+        label: meta.label,
+        labelEn: meta.labelEn,
+        fromStatus: log.fromStatus,
+        toStatus: log.toStatus || stageKey,
+        timestamp: formatTimelineDate(log.timestamp),
+        rawTimestamp: log.timestamp,
+        author: log.userName || log.user || settings?.ownerName || 'ผู้ดูแลระบบ',
+        notes: log.note || log.details || meta.description,
+        isCurrent: isCurrentStage,
+        isCompleted: true,
+        badgeBg: meta.badgeBg,
+        badgeText: meta.badgeText,
+        badgeBorder: meta.badgeBorder,
+        dotBg: meta.dotBg,
+      });
+    });
+
+    let currentIdx = -1;
+    for (let i = events.length - 1; i >= 0; i--) {
+      if (events[i].stageKey === currentStatus) {
+        currentIdx = i;
+        break;
+      }
+    }
+    if (currentIdx !== -1) {
+      events.forEach((e: StatusTimelineEvent, i: number) => {
+        e.isCurrent = i === currentIdx;
+      });
+    }
+    return events;
+  }
+
+  // 2. Fallback / Derive when no activityLog is explicitly recorded yet
+  events.push({
+    id: `timeline-draft-${plot.id}`,
+    stageKey: 'draft',
+    label: STATUS_METADATA.draft.label,
+    labelEn: STATUS_METADATA.draft.labelEn,
+    toStatus: 'draft',
+    timestamp: formatTimelineDate(plot.purchaseDate),
+    rawTimestamp: plot.purchaseDate,
+    author: settings?.ownerName || 'คุณอภิวัชร์',
+    notes: 'สร้างรายการแปลงที่ดินและสำรวจข้อมูลเอกสารสิทธิ์เบื้องต้น (Draft)',
+    isCurrent: false,
+    isCompleted: true,
+    badgeBg: STATUS_METADATA.draft.badgeBg,
+    badgeText: STATUS_METADATA.draft.badgeText,
+    badgeBorder: STATUS_METADATA.draft.badgeBorder,
+    dotBg: STATUS_METADATA.draft.dotBg,
+  });
+
+  const isHolding = currentStatus === 'holding';
+  events.push({
+    id: `timeline-holding-${plot.id}`,
+    stageKey: 'holding',
+    label: STATUS_METADATA.holding.label,
+    labelEn: STATUS_METADATA.holding.labelEn,
+    fromStatus: 'draft',
+    toStatus: 'holding',
+    timestamp: formatTimelineDate(plot.purchaseDate),
+    rawTimestamp: plot.purchaseDate,
+    author: settings?.ownerName || 'คุณอภิวัชร์',
+    notes: `โอนกรรมสิทธิ์และเริ่มถือครองที่ดิน (ต้นทุนรวม ${formatCurrency(plot.totalCost)})`,
+    isCurrent: isHolding,
+    isCompleted: true,
+    badgeBg: STATUS_METADATA.holding.badgeBg,
+    badgeText: STATUS_METADATA.holding.badgeText,
+    badgeBorder: STATUS_METADATA.holding.badgeBorder,
+    dotBg: STATUS_METADATA.holding.dotBg,
+  });
+
+  if (currentStatus === 'for_sale' || (currentStatus === 'sold' && plot.targetSalePrice > 0)) {
+    events.push({
+      id: `timeline-forsale-${plot.id}`,
+      stageKey: 'for_sale',
+      label: STATUS_METADATA.for_sale.label,
+      labelEn: STATUS_METADATA.for_sale.labelEn,
+      fromStatus: 'holding',
+      toStatus: 'for_sale',
+      timestamp: formatTimelineDate(plot.updatedAt),
+      rawTimestamp: plot.updatedAt,
+      author: settings?.ownerName || 'คุณอภิวัชร์',
+      notes: `เปิดทำการตลาดและประกาศขาย (เป้าหมายราคา ${formatCurrency(plot.targetSalePrice)})`,
+      isCurrent: currentStatus === 'for_sale',
+      isCompleted: true,
+      badgeBg: STATUS_METADATA.for_sale.badgeBg,
+      badgeText: STATUS_METADATA.for_sale.badgeText,
+      badgeBorder: STATUS_METADATA.for_sale.badgeBorder,
+      dotBg: STATUS_METADATA.for_sale.dotBg,
+    });
+  }
+
+  if (currentStatus === 'consignment') {
+    events.push({
+      id: `timeline-consignment-${plot.id}`,
+      stageKey: 'consignment',
+      label: STATUS_METADATA.consignment.label,
+      labelEn: STATUS_METADATA.consignment.labelEn,
+      fromStatus: 'holding',
+      toStatus: 'consignment',
+      timestamp: formatTimelineDate(plot.purchaseDate),
+      rawTimestamp: plot.purchaseDate,
+      author: settings?.ownerName || 'คุณอภิวัชร์',
+      notes: `จดทะเบียนสัญญาขายฝาก / วางเงินมัดจำ (วงเงินรับซื้อ ${formatCurrency(plot.purchasePrice)})`,
+      isCurrent: true,
+      isCompleted: true,
+      badgeBg: STATUS_METADATA.consignment.badgeBg,
+      badgeText: STATUS_METADATA.consignment.badgeText,
+      badgeBorder: STATUS_METADATA.consignment.badgeBorder,
+      dotBg: STATUS_METADATA.consignment.dotBg,
+    });
+  }
+
+  if (currentStatus === 'sold' || (plot.saleDate && plot.saleDate !== '-' && plot.saleDate !== 'ยังไม่ขาย')) {
+    events.push({
+      id: `timeline-sold-${plot.id}`,
+      stageKey: 'sold',
+      label: STATUS_METADATA.sold.label,
+      labelEn: STATUS_METADATA.sold.labelEn,
+      fromStatus: currentStatus === 'for_sale' ? 'for_sale' : 'holding',
+      toStatus: 'sold',
+      timestamp: formatTimelineDate(plot.saleDate || plot.updatedAt),
+      rawTimestamp: plot.saleDate || plot.updatedAt,
+      author: settings?.ownerName || 'คุณอภิวัชร์',
+      notes: `ปิดการขายสำเร็จ โอนกรรมสิทธิ์ ณ กรมที่ดิน (ยอดขายจริง ${formatCurrency(plot.soldPrice || plot.targetSalePrice || 0)})`,
+      isCurrent: currentStatus === 'sold',
+      isCompleted: true,
+      badgeBg: STATUS_METADATA.sold.badgeBg,
+      badgeText: STATUS_METADATA.sold.badgeText,
+      badgeBorder: STATUS_METADATA.sold.badgeBorder,
+      dotBg: STATUS_METADATA.sold.dotBg,
+    });
+  }
+
+  return events;
+};
+
 export const LandDetailModal: React.FC<LandDetailModalProps> = ({
   plot,
   onClose,
@@ -238,7 +541,7 @@ export const LandDetailModal: React.FC<LandDetailModalProps> = ({
   const plotSummaryPdfRef = useRef<HTMLDivElement | null>(null);
 
   // Active sub-tab inside detail modal for clean screen space
-  const [activeTab, setActiveTab] = useState<'overview' | 'checklist' | 'map' | 'roi' | 'notes' | 'drive'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'timeline' | 'checklist' | 'map' | 'roi' | 'notes' | 'drive'>('overview');
   const [checklistFilter, setChecklistFilter] = useState<'all' | 'uploaded' | 'missing'>('all');
   const [isUploadingDoc, setIsUploadingDoc] = useState<string | null>(null);
   const [editingNoteDocId, setEditingNoteDocId] = useState<string | null>(null);
@@ -392,17 +695,64 @@ export const LandDetailModal: React.FC<LandDetailModalProps> = ({
   const currentStage = STATUS_STAGES.find((s) => s.status === plot.status) || STATUS_STAGES[0];
   const currentStatusIndex = STATUS_STAGES.findIndex((s) => s.status === plot.status);
 
-  // Fast Status Change Handler
+  // Read-only Timeline of Status Changes (Draft -> Holding -> ...)
+  const statusTimelineEvents = useMemo(() => {
+    return buildPlotStatusTimeline(plot, settings);
+  }, [plot, settings]);
+
+  // Fast Status Change Handler with Activity Log Preservation
   const handleUpdateStatus = (newStatus: LandStatus) => {
     if (!onUpdatePlot) return;
-    const updated = {
+    const fromLabel = STATUS_STAGES.find((s) => s.status === plot.status)?.label || plot.status;
+    const toLabel = STATUS_STAGES.find((s) => s.status === newStatus)?.label || newStatus;
+
+    const newLogItem: PlotActivityLogItem = {
+      id: `act-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      action: 'status_change',
+      fromStatus: plot.status,
+      toStatus: newStatus,
+      status: newStatus,
+      timestamp: new Date().toISOString(),
+      user: user?.displayName || user?.email || settings?.ownerName || 'คุณอภิวัชร์',
+      note: `เปลี่ยนสถานะจาก "${fromLabel}" เป็น "${toLabel}"`,
+    };
+
+    // If plot had no activityLog before, seed baseline previous events so we maintain full continuous history
+    let existingLogs = plot.activityLog || [];
+    if (existingLogs.length === 0) {
+      existingLogs = [
+        {
+          id: `act-init-draft-${plot.id}`,
+          action: 'create',
+          fromStatus: 'draft',
+          toStatus: 'draft',
+          status: 'draft',
+          timestamp: plot.purchaseDate || new Date().toISOString(),
+          user: settings?.ownerName || 'คุณอภิวัชร์',
+          note: 'ร่างข้อมูลแปลงเริ่มต้น (Draft)',
+        },
+        {
+          id: `act-init-${plot.status}-${plot.id}`,
+          action: 'status_change',
+          fromStatus: 'draft',
+          toStatus: plot.status,
+          status: plot.status,
+          timestamp: plot.purchaseDate || new Date().toISOString(),
+          user: settings?.ownerName || 'คุณอภิวัชร์',
+          note: `เข้าสู่สถานะ ${fromLabel}`,
+        },
+      ];
+    }
+
+    const updated: LandPlot = {
       ...plot,
       status: newStatus,
       saleDate: newStatus === 'sold' && !plot.saleDate ? new Date().toLocaleDateString('th-TH') : plot.saleDate,
+      activityLog: [...existingLogs, newLogItem],
       updatedAt: new Date().toISOString(),
     };
     onUpdatePlot(updated);
-    showToast(`อัปเดตสถานะเป็น: ${STATUS_STAGES.find((s) => s.status === newStatus)?.label}`);
+    showToast(`อัปเดตสถานะเป็น: ${toLabel} พร้อมบันทึกลงประวัติเรียบร้อยแล้ว`);
   };
 
   // Save New Coordinates from Map
@@ -882,6 +1232,21 @@ export const LandDetailModal: React.FC<LandDetailModalProps> = ({
           </button>
 
           <button
+            onClick={() => setActiveTab('timeline')}
+            className={`px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
+              activeTab === 'timeline'
+                ? 'bg-slate-800 text-white border border-slate-700'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+            }`}
+          >
+            <History className="w-3.5 h-3.5 text-blue-400" />
+            <span>ประวัติสถานะ (Timeline)</span>
+            <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono font-semibold bg-blue-500/20 text-blue-300">
+              {statusTimelineEvents.length}
+            </span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('checklist')}
             className={`px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
               activeTab === 'checklist'
@@ -1052,6 +1417,139 @@ export const LandDetailModal: React.FC<LandDetailModalProps> = ({
                     <span className="text-[11px] text-slate-400 block">ต้นทุนผูกพันรวม:</span>
                     <span className="font-mono text-amber-400 font-bold">{formatCurrency(plot.totalCost)}</span>
                   </div>
+                </div>
+              </div>
+
+              {/* READ-ONLY STATUS CHANGE TIMELINE (Draft -> Holding -> ...) */}
+              <div className="p-4 sm:p-5 rounded-xl bg-slate-950/60 border border-slate-800 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 rounded-xl bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                      <History className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-bold text-white text-xs sm:text-sm">
+                          ไทม์ไลน์ประวัติการเปลี่ยนสถานะ (Status History Timeline)
+                        </h3>
+                        <span className="inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
+                          <Lock className="w-2.5 h-2.5 text-slate-400" />
+                          <span>อ่านอย่างเดียว (Read-only)</span>
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        ดึงข้อมูลประวัติจาก Activity Log ของแปลงที่ดิน แสดงลำดับการเปลี่ยนสถานะตั้งแต่เริ่มต้น
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('timeline')}
+                      className="px-2.5 py-1 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 text-blue-300 border border-blue-500/30 text-xs font-semibold flex items-center gap-1 cursor-pointer transition-colors"
+                      title="เปิดดูประวัติกิจกรรมและการเปลี่ยนสถานะฉบับเต็ม"
+                    >
+                      <span>ดูรายละเอียดประวัติทั้งหมด ({statusTimelineEvents.length})</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Status Progression Sequence Flow */}
+                <div className="p-3 rounded-xl bg-slate-900/70 border border-slate-800/90 flex flex-wrap items-center gap-2 text-xs">
+                  <span className="text-slate-400 font-medium text-[11px] mr-1">ลำดับขั้น:</span>
+                  {statusTimelineEvents.map((evt: StatusTimelineEvent, idx: number) => (
+                    <React.Fragment key={evt.id}>
+                      {idx > 0 && <span className="text-slate-600 font-bold">➔</span>}
+                      <span
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all ${
+                          evt.isCurrent
+                            ? `${evt.badgeBg} ${evt.badgeText} ${evt.badgeBorder} ring-2 ring-emerald-500/30 shadow-sm`
+                            : 'bg-slate-900 text-slate-400 border-slate-800'
+                        }`}
+                      >
+                        <span className={`w-2 h-2 rounded-full ${evt.isCurrent ? 'bg-emerald-400 animate-pulse' : evt.dotBg}`} />
+                        <span>{evt.labelEn}</span>
+                        {evt.isCurrent && (
+                          <span className="text-[9px] px-1 py-0.2 rounded bg-emerald-500/30 text-emerald-200 font-mono">
+                            ปัจจุบัน
+                          </span>
+                        )}
+                      </span>
+                    </React.Fragment>
+                  ))}
+                </div>
+
+                {/* Vertical Timeline Nodes */}
+                <div className="relative pl-6 sm:pl-8 space-y-4 pt-1 before:absolute before:left-3 sm:before:left-4 before:top-3 before:bottom-3 before:w-0.5 before:bg-gradient-to-b before:from-slate-700 before:via-blue-500/50 before:to-emerald-500/40">
+                  {statusTimelineEvents.map((event: StatusTimelineEvent, idx: number) => (
+                    <div key={event.id} className="relative group">
+                      {/* Node Circle */}
+                      <div
+                        className={`absolute -left-6 sm:-left-8 top-1.5 w-4 h-4 rounded-full border-2 transition-all flex items-center justify-center ${
+                          event.isCurrent
+                            ? 'bg-emerald-500 border-white ring-4 ring-emerald-500/25'
+                            : `${event.dotBg} border-slate-900 ring-2 ring-slate-800`
+                        }`}
+                      >
+                        {event.isCurrent && <span className="w-1.5 h-1.5 bg-white rounded-full animate-ping" />}
+                      </div>
+
+                      {/* Content Card */}
+                      <div
+                        className={`p-3.5 rounded-xl border transition-all ${
+                          event.isCurrent
+                            ? 'bg-slate-900/90 border-emerald-500/50 shadow-md ring-1 ring-emerald-500/20'
+                            : 'bg-slate-900/50 border-slate-800/80 hover:border-slate-700'
+                        }`}
+                      >
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 mb-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span
+                              className={`px-2 py-0.5 rounded-md text-[11px] font-bold border ${event.badgeBg} ${event.badgeText} ${event.badgeBorder}`}
+                            >
+                              {event.label}
+                            </span>
+                            {event.fromStatus && event.toStatus && event.fromStatus !== event.toStatus && (
+                              <span className="text-[11px] text-slate-400 font-mono flex items-center gap-1">
+                                <span>({event.fromStatus}</span>
+                                <ArrowRight className="w-3 h-3 text-slate-500 inline" />
+                                <span className="text-white font-semibold">{event.toStatus})</span>
+                              </span>
+                            )}
+                            {event.isCurrent && (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                สถานะปัจจุบันของแปลง
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-1.5 text-[11px] font-mono text-slate-400">
+                            <Calendar className="w-3 h-3 text-slate-500" />
+                            <span>{event.timestamp}</span>
+                          </div>
+                        </div>
+
+                        <p className="text-xs text-slate-300 mt-1.5">
+                          {event.notes}
+                        </p>
+
+                        {event.author && (
+                          <div className="mt-2 pt-2 border-t border-slate-800/70 flex items-center justify-between text-[11px] text-slate-400">
+                            <span className="flex items-center gap-1">
+                              <span className="text-slate-500">บันทึกโดย:</span>
+                              <strong className="text-slate-300">{event.author}</strong>
+                            </span>
+                            <span className="text-[10px] font-mono text-slate-500">
+                              ลำดับขั้น #{idx + 1}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
 
@@ -1503,6 +2001,206 @@ export const LandDetailModal: React.FC<LandDetailModalProps> = ({
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* TAB: TIMELINE OF STATUS CHANGES (Read-only Audit Trail: Draft -> Holding -> Sold) */}
+          {activeTab === 'timeline' && (
+            <div className="space-y-6">
+              {/* Timeline Header & Summary Card */}
+              <div className="p-5 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-blue-500/15 border border-blue-500/30 flex items-center justify-center text-blue-400">
+                      <History className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-bold text-white text-sm sm:text-base">
+                          ไทม์ไลน์ประวัติการเปลี่ยนสถานะ (Status History Timeline)
+                        </h3>
+                        <span className="inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-850 text-slate-300 border border-slate-700">
+                          <Lock className="w-2.5 h-2.5 text-slate-400" />
+                          <span>อ่านอย่างเดียว (Read-only)</span>
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        ดึงข้อมูลประวัติจาก Activity Log ของแปลงที่ดิน แสดงลำดับขั้นตอนตั้งแต่เริ่มต้นจนถึงปัจจุบัน
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="px-3 py-1 rounded-lg text-xs font-semibold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                      <span>สถานะปัจจุบัน: {currentStage.label}</span>
+                    </span>
+                  </div>
+                </div>
+
+                {/* 4 Summary Stats Strip */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                  <div className="p-3 rounded-xl bg-slate-900 border border-slate-800">
+                    <span className="text-[11px] text-slate-400 block">สถานะปัจจุบัน:</span>
+                    <span className="font-bold text-white text-sm mt-0.5 block">{currentStage.label}</span>
+                    <span className="text-[10px] text-slate-500 font-mono">ความคืบหน้า {currentStage.percent}%</span>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-slate-900 border border-slate-800">
+                    <span className="text-[11px] text-slate-400 block">จำนวนขั้นตอนที่บันทึก:</span>
+                    <span className="font-bold text-blue-400 font-mono text-sm mt-0.5 block">{statusTimelineEvents.length} เหตุการณ์</span>
+                    <span className="text-[10px] text-slate-500 font-mono">ตรวจสอบบันทึกครบถ้วน</span>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-slate-900 border border-slate-800">
+                    <span className="text-[11px] text-slate-400 block">จุดเริ่มต้น (Draft):</span>
+                    <span className="font-mono text-slate-200 text-xs mt-0.5 block line-clamp-1">{statusTimelineEvents[0]?.timestamp || '-'}</span>
+                    <span className="text-[10px] text-slate-500 font-mono">สร้างรายการแปลง</span>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-slate-900 border border-slate-800">
+                    <span className="text-[11px] text-slate-400 block">บันทึกล่าสุด:</span>
+                    <span className="font-mono text-emerald-400 text-xs mt-0.5 block line-clamp-1">
+                      {statusTimelineEvents[statusTimelineEvents.length - 1]?.timestamp || '-'}
+                    </span>
+                    <span className="text-[10px] text-slate-500 font-mono">สถานะล่าสุด</span>
+                  </div>
+                </div>
+
+                {/* Progression Breadcrumb Banner */}
+                <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 space-y-2">
+                  <div className="text-[11px] font-semibold text-slate-400 flex items-center justify-between">
+                    <span>เส้นทางสถานะของแปลง (Progression Pipeline):</span>
+                    <span className="text-slate-500 font-mono text-[10px]">Read-only Audit Log</span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                    {statusTimelineEvents.map((evt: StatusTimelineEvent, idx: number) => (
+                      <React.Fragment key={evt.id}>
+                        {idx > 0 && <ArrowRight className="w-3.5 h-3.5 text-slate-600 shrink-0" />}
+                        <div
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all ${
+                            evt.isCurrent
+                              ? `${evt.badgeBg} ${evt.badgeText} ${evt.badgeBorder} ring-2 ring-emerald-500/40 shadow-md`
+                              : 'bg-slate-950/70 text-slate-400 border-slate-800'
+                          }`}
+                        >
+                          <span className={`w-2 h-2 rounded-full ${evt.isCurrent ? 'bg-emerald-400 animate-pulse' : evt.dotBg}`} />
+                          <span>#{idx + 1} {evt.label}</span>
+                          {evt.isCurrent && (
+                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-500/30 text-emerald-200 font-mono font-bold">
+                              ปัจจุบัน
+                            </span>
+                          )}
+                        </div>
+                      </React.Fragment>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Detailed Timeline Feed */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between text-xs text-slate-400 px-1">
+                  <h4 className="font-bold text-white text-xs sm:text-sm flex items-center gap-2">
+                    <Milestone className="w-4 h-4 text-emerald-400" />
+                    ลำดับเหตุการณ์การเปลี่ยนสถานะตามเวลาจริง (Chronological Events)
+                  </h4>
+                  <span className="text-[11px] font-mono text-slate-500">
+                    เรียงจากอดีต ➔ ปัจจุบัน
+                  </span>
+                </div>
+
+                <div className="relative pl-6 sm:pl-8 space-y-6 before:absolute before:left-3 sm:before:left-4 before:top-4 before:bottom-4 before:w-0.5 before:bg-gradient-to-b before:from-slate-700 via-blue-500/50 to-emerald-500/60">
+                  {statusTimelineEvents.map((event: StatusTimelineEvent, idx: number) => (
+                    <div key={event.id} className="relative group">
+                      {/* Node Bullet */}
+                      <div
+                        className={`absolute -left-6 sm:-left-8 top-3 w-4 h-4 rounded-full border-2 transition-all flex items-center justify-center ${
+                          event.isCurrent
+                            ? 'bg-emerald-500 border-white ring-4 ring-emerald-500/30'
+                            : `${event.dotBg} border-slate-900 ring-2 ring-slate-800`
+                        }`}
+                      >
+                        {event.isCurrent && <span className="w-1.5 h-1.5 bg-white rounded-full animate-ping" />}
+                      </div>
+
+                      {/* Main Event Card */}
+                      <div
+                        className={`p-4 sm:p-5 rounded-2xl border transition-all ${
+                          event.isCurrent
+                            ? 'bg-slate-900/95 border-emerald-500/60 shadow-xl ring-1 ring-emerald-500/30'
+                            : 'bg-slate-950/70 border-slate-800 hover:border-slate-750'
+                        }`}
+                      >
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
+                          <div className="flex items-center gap-2.5 flex-wrap">
+                            <span className="w-6 h-6 rounded-lg bg-slate-800 text-slate-300 font-mono font-bold flex items-center justify-center text-xs border border-slate-700">
+                              {idx + 1}
+                            </span>
+                            <span className={`px-2.5 py-1 rounded-lg text-xs font-bold border ${event.badgeBg} ${event.badgeText} ${event.badgeBorder}`}>
+                              {event.label}
+                            </span>
+                            <span className="text-xs text-slate-400 font-mono font-semibold">
+                              ({event.labelEn})
+                            </span>
+                            {event.isCurrent && (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[10px] font-bold">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                สถานะปัจจุบันของแปลง
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-1.5 text-xs font-mono text-slate-400 bg-slate-900/80 px-2.5 py-1 rounded-lg border border-slate-800">
+                            <Calendar className="w-3.5 h-3.5 text-slate-500" />
+                            <span>{event.timestamp}</span>
+                          </div>
+                        </div>
+
+                        {/* Transition Indicator if fromStatus toStatus */}
+                        {event.fromStatus && event.toStatus && event.fromStatus !== event.toStatus && (
+                          <div className="mb-2 p-2 rounded-lg bg-slate-900/60 border border-slate-800/80 text-xs flex items-center gap-2 font-mono">
+                            <span className="text-slate-400">การเปลี่ยนสถานะ:</span>
+                            <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+                              {STATUS_METADATA[event.fromStatus as 'draft' | LandStatus]?.label || event.fromStatus}
+                            </span>
+                            <ArrowRight className="w-3.5 h-3.5 text-emerald-400" />
+                            <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold">
+                              {STATUS_METADATA[event.toStatus as 'draft' | LandStatus]?.label || event.toStatus}
+                            </span>
+                          </div>
+                        )}
+
+                        <p className="text-xs sm:text-sm text-slate-200 mt-2 leading-relaxed">
+                          {event.notes}
+                        </p>
+
+                        {/* Metadata Footer */}
+                        <div className="mt-3 pt-2.5 border-t border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-[11px] text-slate-400">
+                          <div className="flex items-center gap-2">
+                            <span>ผู้บันทึก: <strong className="text-slate-200">{event.author || 'ระบบ'}</strong></span>
+                            {event.rawTimestamp && event.rawTimestamp.includes('T') && (
+                              <span className="text-slate-500 font-mono">({event.rawTimestamp.split('T')[0]})</span>
+                            )}
+                          </div>
+                          <div className="font-mono text-[10px] text-slate-500">
+                            Event ID: {event.id}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Audit Integrity Notice */}
+                <div className="p-4 rounded-xl bg-slate-950/40 border border-slate-800 text-xs text-slate-400 flex items-start gap-2.5">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                  <div>
+                    <strong className="text-white block mb-0.5">ระบบบันทึกประวัติการเปลี่ยนสถานะอัตโนมัติ (Activity Audit Trail):</strong>
+                    ทุกครั้งที่มีการเปลี่ยนสถานะผ่านแถบ Sales Pipeline หรือการแก้ไขข้อมูลแปลง ระบบจะบันทึกรหัสเหตุการณ์ วันเวลา และผู้ดำเนินการลงใน Activity Log ของแปลงที่ดินโดยอัตโนมัติ พร้อมซิงค์ขึ้น Google Sheets และบันทึกลงฐานข้อมูลอย่างปลอดภัย
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
@@ -2521,7 +3219,7 @@ export const LandDetailModal: React.FC<LandDetailModalProps> = ({
             </div>
 
             {/* Section 1: ข้อมูลทำเลที่ตั้งและลักษณะแปลงที่ดิน */}
-            <div style={{ border: '1px solid #cbd5e1', borderRadius: '8px', padding: '10px 14px', backgroundColor: '#f8fafc' }}>
+            <div style={{ border: '1px solid #cbd5e1', borderRadius: '8px', padding: '10px 14px', backgroundColor: '#ffffff' }}>
               <h3 style={{ fontSize: '11.5px', fontWeight: 'bold', color: '#0f172a', margin: '0 0 6px 0', borderBottom: '1px solid #cbd5e1', paddingBottom: '3px' }}>
                 📍 1. ข้อมูลทำเลที่ตั้งและลักษณะทางกายภาพ
               </h3>
@@ -2536,7 +3234,7 @@ export const LandDetailModal: React.FC<LandDetailModalProps> = ({
             </div>
 
             {/* Section 2: โครงสร้างต้นทุนการได้มา (Acquisition Cost) */}
-            <div style={{ border: '1px solid #cbd5e1', borderRadius: '8px', padding: '10px 14px', backgroundColor: '#f8fafc' }}>
+            <div style={{ border: '1px solid #cbd5e1', borderRadius: '8px', padding: '10px 14px', backgroundColor: '#ffffff' }}>
               <h3 style={{ fontSize: '11.5px', fontWeight: 'bold', color: '#0f172a', margin: '0 0 6px 0', borderBottom: '1px solid #cbd5e1', paddingBottom: '3px' }}>
                 💰 2. บัญชีโครงสร้างต้นทุนการได้มา (Acquisition Cost Breakdown)
               </h3>
@@ -2558,7 +3256,7 @@ export const LandDetailModal: React.FC<LandDetailModalProps> = ({
                     <td style={{ padding: '3px 0', color: '#475569' }}>ค่าพัฒนา ถมดิน ปรับพื้นที่ และค่าใช้จ่ายอื่น:</td>
                     <td style={{ padding: '3px 0', textAlign: 'right', fontWeight: 'bold' }}>{formatCurrency(plot.otherExpenses)}</td>
                   </tr>
-                  <tr style={{ backgroundColor: '#e2e8f0', fontWeight: 'bold', fontSize: '10.5px' }}>
+                  <tr style={{ backgroundColor: '#ffffff', fontWeight: 'bold', fontSize: '10.5px', borderTop: '2px solid #0f172a' }}>
                     <td style={{ padding: '4px 6px', color: '#0f172a' }}>รวมต้นทุนสุทธิทั้งสิ้น (Total Acquisition Cost):</td>
                     <td style={{ padding: '4px 6px', textAlign: 'right', color: '#0f172a' }}>
                       {formatCurrency(plot.totalCost)} ({plot.totalSqWah > 0 ? Math.round(plot.totalCost / plot.totalSqWah).toLocaleString() : 0} บาท/ตร.ว.)
@@ -2569,12 +3267,12 @@ export const LandDetailModal: React.FC<LandDetailModalProps> = ({
             </div>
 
             {/* Section 3: ภาษีที่ดินและสิ่งปลูกสร้าง (พ.ร.บ. 2562) */}
-            <div style={{ border: '1px solid #cbd5e1', borderRadius: '8px', padding: '10px 14px', backgroundColor: '#f8fafc' }}>
+            <div style={{ border: '1px solid #cbd5e1', borderRadius: '8px', padding: '10px 14px', backgroundColor: '#ffffff' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px', borderBottom: '1px solid #cbd5e1', paddingBottom: '3px' }}>
                 <h3 style={{ fontSize: '11.5px', fontWeight: 'bold', color: '#0f172a', margin: 0 }}>
                   ⚖️ 3. การประเมินภาษีที่ดินและสิ่งปลูกสร้าง (พ.ร.บ. 2562)
                 </h3>
-                <span style={{ fontSize: '9.5px', padding: '2px 8px', borderRadius: '4px', backgroundColor: '#e0e7ff', color: '#3730a3', fontWeight: 'bold' }}>
+                <span style={{ fontSize: '9.5px', padding: '2px 8px', borderRadius: '4px', backgroundColor: '#ffffff', border: '1px solid #cbd5e1', color: '#000000', fontWeight: 'bold' }}>
                   {TAX_USAGE_CONFIGS[landTaxCalc.usageType]?.shortLabel || landTaxCalc.usageType}
                 </span>
               </div>
@@ -2675,13 +3373,13 @@ export const LandDetailModal: React.FC<LandDetailModalProps> = ({
             </div>
 
             {/* Section 5: รายการตรวจสอบเอกสารสิทธิ์ 12 รายการ */}
-            <div style={{ border: '1px solid #cbd5e1', borderRadius: '8px', padding: '10px 14px', backgroundColor: '#f8fafc' }}>
+            <div style={{ border: '1px solid #cbd5e1', borderRadius: '8px', padding: '10px 14px', backgroundColor: '#ffffff' }}>
               <h3 style={{ fontSize: '11.5px', fontWeight: 'bold', color: '#0f172a', margin: '0 0 6px 0', borderBottom: '1px solid #cbd5e1', paddingBottom: '3px' }}>
                 📑 5. รายการตรวจสอบความสมบูรณ์เอกสารสิทธิ์ (Legal Due Diligence Checklist)
               </h3>
               <table style={{ width: '100%', fontSize: '9.5px', borderCollapse: 'collapse', textAlign: 'left' }}>
                 <thead>
-                  <tr style={{ backgroundColor: '#e2e8f0', color: '#1e293b' }}>
+                  <tr style={{ backgroundColor: '#ffffff', color: '#1e293b', borderBottom: '1.5px solid #0f172a' }}>
                     <th style={{ padding: '3px 6px', borderBottom: '1px solid #cbd5e1' }}>ลำดับ</th>
                     <th style={{ padding: '3px 6px', borderBottom: '1px solid #cbd5e1' }}>รายการเอกสารสิทธิ์และนิติกรรม</th>
                     <th style={{ padding: '3px 6px', textAlign: 'center', borderBottom: '1px solid #cbd5e1' }}>สถานะไฟล์แนบในระบบ</th>
@@ -2699,7 +3397,8 @@ export const LandDetailModal: React.FC<LandDetailModalProps> = ({
                           borderRadius: '3px',
                           fontSize: '8.5px',
                           fontWeight: 'bold',
-                          backgroundColor: d.isUploaded ? '#dcfce7' : '#fee2e2',
+                          backgroundColor: '#ffffff',
+                          border: d.isUploaded ? '1px solid #16a34a' : '1px solid #dc2626',
                           color: d.isUploaded ? '#15803d' : '#b91c1c'
                         }}>
                           {d.isUploaded ? '✓ แนบไฟล์แล้ว' : '✗ ยังไม่มีไฟล์'}
@@ -2715,14 +3414,14 @@ export const LandDetailModal: React.FC<LandDetailModalProps> = ({
             </div>
 
             {/* Section 6: ข้อมูลโฉนดย่อย (Sub-Parcels) หรือการแบ่งแปลง */}
-            <div style={{ border: '1px solid #cbd5e1', borderRadius: '8px', padding: '8px 14px', backgroundColor: '#f8fafc' }}>
+            <div style={{ border: '1px solid #cbd5e1', borderRadius: '8px', padding: '8px 14px', backgroundColor: '#ffffff' }}>
               <h3 style={{ fontSize: '11px', fontWeight: 'bold', color: '#0f172a', margin: '0 0 4px 0', borderBottom: '1px solid #cbd5e1', paddingBottom: '2px' }}>
                 🗂️ 6. ข้อมูลการแบ่งแยกแปลงย่อย (Sub-Parcels)
               </h3>
               {plot.subParcels && plot.subParcels.length > 0 ? (
                 <table style={{ width: '100%', fontSize: '9px', borderCollapse: 'collapse' }}>
                   <thead>
-                    <tr style={{ backgroundColor: '#e2e8f0', color: '#334155' }}>
+                    <tr style={{ backgroundColor: '#ffffff', color: '#334155', borderBottom: '1.5px solid #0f172a' }}>
                       <th style={{ padding: '2px 4px' }}>แปลงย่อย</th>
                       <th style={{ padding: '2px 4px' }}>เลขที่โฉนด</th>
                       <th style={{ padding: '2px 4px', textAlign: 'right' }}>เนื้อที่ (ไร่-งาน-วา)</th>
@@ -2750,7 +3449,7 @@ export const LandDetailModal: React.FC<LandDetailModalProps> = ({
             </div>
 
             {/* Section 7: บันทึกและข้อสังเกตการลงทุน */}
-            <div style={{ border: '1px solid #cbd5e1', borderRadius: '8px', padding: '8px 14px', backgroundColor: '#f8fafc' }}>
+            <div style={{ border: '1px solid #cbd5e1', borderRadius: '8px', padding: '8px 14px', backgroundColor: '#ffffff' }}>
               <h3 style={{ fontSize: '11px', fontWeight: 'bold', color: '#0f172a', margin: '0 0 4px 0', borderBottom: '1px solid #cbd5e1', paddingBottom: '2px' }}>
                 📝 7. บันทึกและข้อสังเกตการลงทุน (Investment Notes & Remarks)
               </h3>

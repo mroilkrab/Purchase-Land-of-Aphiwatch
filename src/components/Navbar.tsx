@@ -18,13 +18,13 @@ import {
   ChevronDown,
   Check,
   Sun,
-  Moon
+  Moon,
+  RefreshCw
 } from 'lucide-react';
 import { PortfolioSettings, AppFontSize } from '../types/land';
 import { getUserRole, ROLE_DEFINITIONS } from '../services/rbac';
 
 interface NavbarProps {
-
   activeTab: 'dashboard' | 'table' | 'map' | 'reports' | 'simulator' | 'artifact' | 'settings';
   setActiveTab: (tab: 'dashboard' | 'table' | 'map' | 'reports' | 'simulator' | 'artifact' | 'settings') => void;
   user: User | null;
@@ -37,6 +37,12 @@ interface NavbarProps {
   theme: 'dark' | 'light';
   onToggleTheme: () => void;
   isSyncing?: boolean;
+  sheetSyncStatus?: {
+    status: 'idle' | 'syncing' | 'success' | 'error';
+    message: string;
+    sheetUrl?: string;
+    lastSynced?: string;
+  } | null;
 }
 
 const FONT_OPTIONS: { id: AppFontSize; label: string; percent: string; desc: string }[] = [
@@ -59,6 +65,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   theme,
   onToggleTheme,
   isSyncing,
+  sheetSyncStatus,
 }) => {
   const [showFontMenu, setShowFontMenu] = useState(false);
   const fontMenuRef = useRef<HTMLDivElement>(null);
@@ -91,8 +98,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   const roleDef = ROLE_DEFINITIONS[currentUserRole];
 
   return (
-
-    <header className="sticky top-0 z-30 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 shadow-md">
+    <header className="sticky top-0 z-30 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 shadow-md relative">
       <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16 gap-2 sm:gap-4">
           {/* Brand Logo & Name */}
@@ -105,12 +111,25 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-1.5 sm:gap-2">
-                <span className="font-bold text-sm sm:text-base text-white tracking-tight truncate">
+                <span className="font-bold text-sm sm:text-base text-white tracking-tight truncate font-sans">
                   {settings.portfolioTitle || 'ระบบจัดการที่ดิน'}
                 </span>
-                <span className="hidden md:inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shrink-0">
-                  <Sparkles className="w-3 h-3 mr-1" /> Live Portfolio
-                </span>
+
+                {/* Live Sync Status Chip or Live Portfolio badge */}
+                {isSyncing ? (
+                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] sm:text-[11px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 animate-pulse shadow-sm shadow-emerald-500/10 shrink-0">
+                    <RefreshCw className="w-3 h-3 animate-spin text-emerald-400 shrink-0" />
+                    <span className="truncate max-w-[120px] sm:max-w-none">
+                      {sheetSyncStatus?.message && sheetSyncStatus.status === 'syncing' 
+                        ? sheetSyncStatus.message 
+                        : 'กำลังซิงค์ Google Sheets...'}
+                    </span>
+                  </span>
+                ) : (
+                  <span className="hidden md:inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shrink-0">
+                    <Sparkles className="w-3 h-3 mr-1" /> Live Portfolio
+                  </span>
+                )}
               </div>
               <p className="text-[11px] sm:text-xs text-slate-400 hidden sm:block truncate">
                 พอร์ตการลงทุนที่ดิน: {settings.ownerName || 'อภิวัชร์'} • Hybrid Cloud & Map
@@ -374,6 +393,19 @@ export const Navbar: React.FC<NavbarProps> = ({
             ตั้งค่า & สำรองข้อมูล Hybrid
           </button>
         </nav>
+      </div>
+
+      {/* Persistent Subtle Synchronizing Progress Bar for background operations */}
+      <div 
+        className={`absolute bottom-0 left-0 right-0 h-[2.5px] overflow-hidden transition-all duration-300 z-50 ${
+          isSyncing ? 'opacity-100' : 'opacity-0 pointer-events-none'
+        }`}
+        role="progressbar"
+        aria-label="Google Sheets Synchronizing Progress"
+        aria-busy={isSyncing}
+      >
+        <div className="absolute inset-0 bg-emerald-950/40" />
+        <div className="h-full bg-gradient-to-r from-emerald-500 via-teal-300 to-cyan-400 w-full animate-indeterminate-stream animate-pulse-glow" />
       </div>
     </header>
   );

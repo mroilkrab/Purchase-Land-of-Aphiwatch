@@ -2152,7 +2152,7 @@ export const LandTable: React.FC<LandTableProps> = ({
         <div className="border-b-2 border-slate-900 pb-3 mb-4 flex justify-between items-start">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
-              <span className="px-2 py-0.5 rounded bg-slate-900 text-white text-[10px] font-bold tracking-wider uppercase">
+              <span className="px-2 py-0.5 rounded border border-slate-900 bg-white text-black text-[10px] font-bold tracking-wider uppercase">
                 EXECUTIVE LEDGER
               </span>
               <h1 className="text-xl font-extrabold text-black tracking-tight">
@@ -2178,45 +2178,45 @@ export const LandTable: React.FC<LandTableProps> = ({
           </div>
         </div>
 
-        {/* 5 Executive KPI Summary Cards */}
+        {/* 5 Executive KPI Summary Cards - Pure White */}
         <div className="grid grid-cols-5 gap-2.5 mb-4">
-          <div className="p-2.5 border border-slate-300 rounded-lg bg-slate-50/80 shadow-xs">
-            <span className="text-[9.5px] font-semibold text-slate-600 block uppercase">จำนวนแปลงที่ดิน</span>
+          <div className="p-2.5 border border-slate-400 rounded-lg bg-white shadow-none">
+            <span className="text-[9.5px] font-semibold text-slate-700 block uppercase">จำนวนแปลงที่ดิน</span>
             <span className="text-base font-extrabold text-black font-mono">{printTotals.totalPlots} <span className="text-xs font-normal text-slate-700">แปลง</span></span>
           </div>
-          <div className="p-2.5 border border-slate-300 rounded-lg bg-slate-50/80 shadow-xs">
-            <span className="text-[9.5px] font-semibold text-slate-600 block uppercase">เนื้อที่ดินรวมทั้งหมด</span>
+          <div className="p-2.5 border border-slate-400 rounded-lg bg-white shadow-none">
+            <span className="text-[9.5px] font-semibold text-slate-700 block uppercase">เนื้อที่ดินรวมทั้งหมด</span>
             <span className="text-sm font-bold text-black font-mono leading-tight block">{formatThaiArea(printTotals.totalSqWah)}</span>
           </div>
-          <div className="p-2.5 border border-slate-300 rounded-lg bg-slate-50/80 shadow-xs">
-            <span className="text-[9.5px] font-semibold text-slate-600 block uppercase">ต้นทุนรวมสุทธิทั้งสิ้น</span>
+          <div className="p-2.5 border border-slate-400 rounded-lg bg-white shadow-none">
+            <span className="text-[9.5px] font-semibold text-slate-700 block uppercase">ต้นทุนรวมสุทธิทั้งสิ้น</span>
             <span className="text-base font-extrabold text-black font-mono">{formatCurrency(printTotals.totalCost)}</span>
           </div>
-          <div className="p-2.5 border border-slate-300 rounded-lg bg-slate-50/80 shadow-xs">
-            <span className="text-[9.5px] font-semibold text-slate-600 block uppercase">ภาษีที่ดิน/ปี รวม</span>
-            <span className="text-base font-extrabold text-rose-800 font-mono">{formatCurrency(printTotals.totalAnnualLandTax)}</span>
+          <div className="p-2.5 border border-slate-400 rounded-lg bg-white shadow-none">
+            <span className="text-[9.5px] font-semibold text-slate-700 block uppercase">ภาษีที่ดิน/ปี รวม</span>
+            <span className="text-base font-extrabold text-black font-mono">{formatCurrency(printTotals.totalAnnualLandTax)}</span>
           </div>
-          <div className="p-2.5 border border-slate-300 rounded-lg bg-slate-50/80 shadow-xs">
-            <span className="text-[9.5px] font-semibold text-slate-600 block uppercase">มูลค่าเป้าหมาย/ยอดขาย</span>
+          <div className="p-2.5 border border-slate-400 rounded-lg bg-white shadow-none">
+            <span className="text-[9.5px] font-semibold text-slate-700 block uppercase">มูลค่าเป้าหมาย/ยอดขาย</span>
             <span className="text-base font-extrabold text-black font-mono">{formatCurrency(printTotals.totalTargetOrSold)}</span>
           </div>
         </div>
 
-        {/* Financial Table - Fixed 100% table layout for perfect balance without clipping */}
-        <table className="w-full border-collapse border border-slate-300 text-[9.5px] leading-tight table-fixed">
+        {/* Financial Table - Pure White */}
+        <table className="w-full border-collapse border border-slate-400 text-[9.5px] leading-tight table-fixed bg-white">
           <thead>
-            <tr className="bg-slate-100 text-black border-b-2 border-slate-400">
-              <th style={{ width: '3.5%' }} className="py-2 px-1 border border-slate-300 text-center font-bold">#</th>
-              <th style={{ width: '19%' }} className="py-2 px-2 border border-slate-300 text-left font-bold">แปลงที่ดิน / เลขโฉนด</th>
-              <th style={{ width: '13.5%' }} className="py-2 px-1.5 border border-slate-300 text-left font-bold">ทำเล (ตำบล/อำเภอ/จังหวัด)</th>
-              <th style={{ width: '7%' }} className="py-2 px-1.5 border border-slate-300 text-center font-bold">ประเภท</th>
-              <th style={{ width: '9.5%' }} className="py-2 px-1.5 border border-slate-300 text-right font-mono font-bold">เนื้อที่</th>
-              <th style={{ width: '9.5%' }} className="py-2 px-1.5 border border-slate-300 text-right font-mono font-bold whitespace-nowrap">ราคาซื้อ (บาท)</th>
-              <th style={{ width: '7.5%' }} className="py-2 px-1.5 border border-slate-300 text-right font-mono font-bold whitespace-nowrap">ค่าใช้จ่ายอื่น</th>
-              <th style={{ width: '10.5%' }} className="py-2 px-1.5 border border-slate-300 text-right font-mono font-bold whitespace-nowrap">ต้นทุนรวมสุทธิ</th>
-              <th style={{ width: '6.5%' }} className="py-2 px-1.5 border border-slate-300 text-right font-mono font-bold whitespace-nowrap">ภาษี/ปี</th>
-              <th style={{ width: '9%' }} className="py-2 px-1.5 border border-slate-300 text-right font-mono font-bold whitespace-nowrap">เป้า/ขายจริง</th>
-              <th style={{ width: '4.5%' }} className="py-2 px-1 border border-slate-300 text-center font-bold">สถานะ</th>
+            <tr className="bg-white text-black border-b-2 border-slate-900">
+              <th style={{ width: '3.5%' }} className="py-2 px-1 border border-slate-400 text-center font-bold bg-white text-black">#</th>
+              <th style={{ width: '19%' }} className="py-2 px-2 border border-slate-400 text-left font-bold bg-white text-black">แปลงที่ดิน / เลขโฉนด</th>
+              <th style={{ width: '13.5%' }} className="py-2 px-1.5 border border-slate-400 text-left font-bold bg-white text-black">ทำเล (ตำบล/อำเภอ/จังหวัด)</th>
+              <th style={{ width: '7%' }} className="py-2 px-1.5 border border-slate-400 text-center font-bold bg-white text-black">ประเภท</th>
+              <th style={{ width: '9.5%' }} className="py-2 px-1.5 border border-slate-400 text-right font-mono font-bold whitespace-nowrap bg-white text-black">เนื้อที่</th>
+              <th style={{ width: '9.5%' }} className="py-2 px-1.5 border border-slate-400 text-right font-mono font-bold whitespace-nowrap bg-white text-black">ราคาซื้อ (บาท)</th>
+              <th style={{ width: '7.5%' }} className="py-2 px-1.5 border border-slate-400 text-right font-mono font-bold whitespace-nowrap bg-white text-black">ค่าใช้จ่ายอื่น</th>
+              <th style={{ width: '10.5%' }} className="py-2 px-1.5 border border-slate-400 text-right font-mono font-bold whitespace-nowrap bg-white text-black">ต้นทุนรวมสุทธิ</th>
+              <th style={{ width: '6.5%' }} className="py-2 px-1.5 border border-slate-400 text-right font-mono font-bold whitespace-nowrap bg-white text-black">ภาษี/ปี</th>
+              <th style={{ width: '9%' }} className="py-2 px-1.5 border border-slate-400 text-right font-mono font-bold whitespace-nowrap bg-white text-black">เป้า/ขายจริง</th>
+              <th style={{ width: '4.5%' }} className="py-2 px-1 border border-slate-400 text-center font-bold bg-white text-black">สถานะ</th>
             </tr>
           </thead>
           <tbody>
@@ -2225,7 +2225,7 @@ export const LandTable: React.FC<LandTableProps> = ({
               const targetOrSold = plot.status === 'sold' ? (Number(plot.soldPrice) || 0) : (Number(plot.targetSalePrice) || 0);
               const tax = getPlotLandTax(plot);
               return (
-                <tr key={plot.id} className="border-b border-slate-200 even:bg-slate-50/70 hover:bg-slate-100/50">
+                <tr key={plot.id} className="border-b border-slate-300 bg-white">
                   <td className="py-1.5 px-1 border border-slate-300 text-center font-mono font-bold text-slate-800">
                     {plot.orderNumber || idx + 1}
                   </td>

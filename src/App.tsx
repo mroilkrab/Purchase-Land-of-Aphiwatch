@@ -40,6 +40,7 @@ import { LandFormModal } from './components/LandFormModal';
 import { LandDetailModal } from './components/LandDetailModal';
 import { GoogleAuthTroubleshootModal } from './components/GoogleAuthTroubleshootModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { QuickActionFab } from './components/QuickActionFab';
 import { CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
 
 export default function App() {
@@ -466,7 +467,7 @@ export default function App() {
   const nextOrderNumber = Math.max(...plots.map((p) => p.orderNumber || 0), 0) + 1;
 
   return (
-    <div className="min-h-screen bg-[#0c121e] text-slate-100 flex flex-col font-['Prompt',sans-serif] overflow-x-hidden max-w-full app-container transition-colors duration-200">
+    <div className="min-h-screen bg-[#0c121e] text-slate-100 flex flex-col font-['IBM_Plex_Sans_Thai','Plus_Jakarta_Sans','Prompt',sans-serif] overflow-x-hidden max-w-full app-container transition-colors duration-200">
       {/* Navigation Bar */}
       <Navbar
         activeTab={activeTab}
@@ -487,6 +488,8 @@ export default function App() {
         onFontSizeChange={handleFontSizeChange}
         theme={settings.theme || 'dark'}
         onToggleTheme={handleToggleTheme}
+        isSyncing={isSyncingSheet}
+        sheetSyncStatus={sheetSyncStatus}
       />
 
       {/* Main Content Area */}
@@ -669,9 +672,31 @@ export default function App() {
         onRetry={handleLogin}
       />
 
+      {/* Quick Action Floating Action Button (FAB) on Dashboard and Table views */}
+      {(activeTab === 'dashboard' || activeTab === 'table') && (
+        <QuickActionFab
+          onAddNewPlot={() => {
+            if (!hasPermission(currentUserRole, 'canCreate')) {
+              showToast('⚠️ สิทธิ์ของคุณคือ ผู้เข้าชม (Viewer) - ดูและพิมพ์รายงาน A4 ได้เท่านั้น');
+              return;
+            }
+            setEditingPlot(null);
+            setIsFormOpen(true);
+          }}
+          onGenerateReport={() => {
+            setActiveTab('reports');
+            showToast('📄 เปิดหน้าพิมพ์รายงานและสรุปข้อมูล A4 แล้ว');
+          }}
+          onSyncSheet={handleManualSyncSheet}
+          onOpenMap={() => setActiveTab('map')}
+          isSyncingSheet={isSyncingSheet}
+          canCreate={hasPermission(currentUserRole, 'canCreate')}
+        />
+      )}
+
       {/* Toast Notification */}
       {toastMessage && (
-        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 text-white text-xs sm:text-sm font-medium shadow-2xl shadow-emerald-600/40 animate-fade-in">
+        <div className="fixed bottom-6 left-6 sm:left-auto sm:right-24 z-50 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 text-white text-xs sm:text-sm font-medium shadow-2xl shadow-emerald-600/40 animate-fade-in border border-emerald-400/30">
           <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
           <span>{toastMessage}</span>
         </div>

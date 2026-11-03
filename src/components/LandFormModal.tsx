@@ -338,6 +338,29 @@ export const LandFormModal: React.FC<LandFormModalProps> = ({
     const isIndividual = formData.isIndividualOwner !== false;
     const vacantYears = Number(formData.vacantConsecutiveYears) || 0;
 
+    let currentLogs = [...(formData.activityLog || initialData?.activityLog || [])];
+    if (!initialData) {
+      currentLogs.push({
+        id: `act-${Date.now()}`,
+        action: 'create',
+        fromStatus: 'draft',
+        toStatus: formData.status || 'holding',
+        status: formData.status || 'holding',
+        timestamp: new Date().toISOString(),
+        note: `สร้างแปลงที่ดินใหม่ "${formData.title}"`,
+      });
+    } else if (initialData.status !== formData.status && formData.status) {
+      currentLogs.push({
+        id: `act-${Date.now()}`,
+        action: 'status_change',
+        fromStatus: initialData.status,
+        toStatus: formData.status,
+        status: formData.status,
+        timestamp: new Date().toISOString(),
+        note: `แก้ไขสถานะแปลงจาก "${initialData.status}" เป็น "${formData.status}"`,
+      });
+    }
+
     const finalPlot: LandPlot = {
       ...(formData as LandPlot),
       id: formData.id || `plot-${Date.now()}`,
@@ -347,6 +370,7 @@ export const LandFormModal: React.FC<LandFormModalProps> = ({
       isIndividualOwner: isIndividual,
       vacantConsecutiveYears: vacantYears,
       annualLandTax: liveTaxResult.annualTax,
+      activityLog: currentLogs,
       updatedAt: new Date().toISOString(),
     };
 

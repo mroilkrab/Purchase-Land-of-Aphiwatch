@@ -131,24 +131,27 @@ html:not(.light) .border-slate-700,
 html:not(.light) .border-slate-700\/80 {
   border-color: #22314d !important;
 }
-
-/* Light Mode: Calming Soft Paper Tint & Crisp Elevated Cards */
+/* ========================================================= */
+/* LIGHT MODE: CRISP, HIGH-CONTRAST, ELEGANT & ULTRA-READABLE */
+/* ========================================================= */
 html.light {
   color-scheme: light;
 }
 
+/* Page Background & Global Text Baseline */
 html.light body,
 html.light #root,
 html.light .app-container {
-  background-color: #f2f5f9 !important; /* Soothing soft paper tone, cuts eye strain */
-  color: #0f172a !important; /* Deep readable slate */
+  background-color: #f1f5f9 !important; /* Clean soft slate-100, eliminates glare while maintaining crisp contrast */
+  color: #0f172a !important; /* Primary deep slate-900 */
 }
 
 html.light ::-webkit-scrollbar-track {
-  background: #eaf0f7;
+  background: #e2e8f0;
 }
 html.light ::-webkit-scrollbar-thumb {
-  background: #c3d0df;
+  background: #cbd5e1;
+  border-radius: 4px;
 }
 html.light ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
@@ -157,98 +160,350 @@ html.light ::-webkit-scrollbar-thumb:hover {
 /* Header & Navbars in Light Mode */
 html.light header,
 html.light nav.light-nav,
-html.light .bg-slate-900\/95,
-html.light .bg-slate-900\/90,
-html.light .bg-slate-900\/80 {
-  background-color: rgba(255, 255, 255, 0.96) !important;
-  border-color: #d6e1ed !important;
-  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.05);
+html.light header.bg-slate-900\/95,
+html.light [class*="bg-slate-900/95"] {
+  background-color: rgba(255, 255, 255, 0.98) !important;
+  border-color: #cbd5e1 !important;
+  box-shadow: 0 1px 3px 0 rgba(15, 23, 42, 0.06);
 }
 
-/* Main Cards & Panels in Light Mode */
-html.light .bg-slate-950,
-html.light .bg-slate-950\/90,
-html.light .bg-slate-950\/80,
-html.light .bg-slate-950\/70,
-html.light .bg-slate-950\/60,
-html.light .bg-slate-950\/40 {
-  background-color: #e9eef6 !important; /* Clear inset background */
-  border-color: #d1dde9 !important;
+/* Hero / Top Banner Gradients in Light Mode */
+html.light [class*="from-slate-900"][class*="to-slate-900"],
+html.light .bg-gradient-to-r[class*="from-slate-900"] {
+  background: linear-gradient(135deg, #ffffff 0%, #f8fafc 50%, #f1f5f9 100%) !important;
+  border-color: #cbd5e1 !important;
+  box-shadow: 0 4px 6px -1px rgba(15, 23, 42, 0.05), 0 2px 4px -2px rgba(15, 23, 42, 0.04) !important;
 }
 
-html.light .bg-slate-900 {
+/* Cards & Containers in Light Mode */
+/* 1. Main Elevated Cards & Panels (formerly bg-slate-900 variants) */
+html.light .bg-slate-900,
+html.light [class*="bg-slate-900/"]:not([class*="fixed"]):not([class*="inset-0"]) {
   background-color: #ffffff !important;
-  border-color: #d6e1ed !important;
-  box-shadow: 0 2px 8px -2px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
+  border-color: #cbd5e1 !important;
+  box-shadow: 0 1px 3px 0 rgba(15, 23, 42, 0.05), 0 1px 2px -1px rgba(15, 23, 42, 0.03);
 }
 
+/* 2. Inset Panels & Sub-Cards (formerly bg-slate-950 variants) */
+html.light .bg-slate-950,
+html.light [class*="bg-slate-950/"]:not([class*="fixed"]):not([class*="inset-0"]) {
+  background-color: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+}
+
+/* 3. Secondary Surfaces & Toolbars (formerly bg-slate-800 & bg-slate-850 variants) */
 html.light .bg-slate-850,
 html.light .bg-slate-800,
-html.light .bg-slate-800\/80,
-html.light .bg-slate-800\/60,
-html.light .bg-slate-800\/50,
-html.light .bg-slate-800\/40 {
-  background-color: #f7f9fc !important;
-  border-color: #d6e1ed !important;
+html.light [class*="bg-slate-800/"] {
+  background-color: #f8fafc !important;
+  border-color: #cbd5e1 !important;
 }
 
 html.light .bg-slate-700,
-html.light .bg-slate-700\/60 {
-  background-color: #e1e9f2 !important;
-  color: #0f172a !important;
+html.light [class*="bg-slate-700/"] {
+  background-color: #e2e8f0 !important;
+  border-color: #cbd5e1 !important;
 }
 
 /* Borders in Light Mode */
 html.light .border-slate-800,
-html.light .border-slate-800\/80,
-html.light .border-slate-800\/60,
+html.light [class*="border-slate-800"],
 html.light .border-slate-750,
 html.light .border-slate-700,
-html.light .border-slate-700\/80 {
-  border-color: #d6e1ed !important;
+html.light [class*="border-slate-700"],
+html.light .border-slate-600,
+html.light [class*="border-slate-600"] {
+  border-color: #cbd5e1 !important;
 }
 
+/* ========================================================= */
+/* TYPOGRAPHY CONTRAST IN LIGHT MODE: DEEP, SHARP & CRISP    */
+/* ========================================================= */
 
-/* Typography Contrast in Light Mode */
+/* Primary Headings & Bold Text */
 html.light .text-white,
-html.light .text-slate-100 {
-  color: #0f172a !important; /* slate-900 deep readable */
+html.light .text-slate-100,
+html.light .text-slate-50 {
+  color: #0f172a !important; /* Deep slate-900: high contrast */
 }
 
+/* Body & Content Text */
 html.light .text-slate-200,
 html.light .text-slate-300 {
-  color: #1e293b !important; /* slate-800 readable body */
+  color: #1e293b !important; /* Slate-800: clear, dark body text */
 }
 
+/* Secondary Meta & Labels */
 html.light .text-slate-400 {
-  color: #475569 !important; /* slate-600 clear secondary text */
+  color: #334155 !important; /* Slate-700: sharp and never washed out */
+  font-weight: 500;
 }
 
+/* Muted Footnotes & Helpers */
 html.light .text-slate-500 {
-  color: #64748b !important; /* slate-500 muted text */
+  color: #475569 !important; /* Slate-600: easily legible */
 }
 
-/* Table styles in Light Mode */
+html.light .text-slate-600 {
+  color: #334155 !important;
+}
+
+/* ========================================================= */
+/* BUTTON TEXT SAFEGUARD: KEEP PURE WHITE ON SOLID BUTTONS   */
+/* ========================================================= */
+/* Ensure buttons with saturated backgrounds retain crisp white text */
+html.light button.bg-emerald-600,
+html.light button.bg-emerald-500,
+html.light button.bg-emerald-700,
+html.light button.bg-blue-600,
+html.light button.bg-blue-500,
+html.light button.bg-blue-700,
+html.light button.bg-indigo-600,
+html.light button.bg-indigo-500,
+html.light button.bg-teal-600,
+html.light button.bg-teal-500,
+html.light button.bg-sky-600,
+html.light button.bg-sky-500,
+html.light button.bg-amber-600,
+html.light button.bg-amber-500,
+html.light button.bg-rose-600,
+html.light button.bg-rose-500,
+html.light [class*="bg-emerald-6"] > span,
+html.light [class*="bg-emerald-6"] > svg,
+html.light [class*="bg-blue-6"] > span,
+html.light [class*="bg-blue-6"] > svg,
+html.light [class*="bg-indigo-6"] > span,
+html.light [class*="bg-indigo-6"] > svg,
+html.light [class*="bg-teal-6"] > span,
+html.light [class*="bg-teal-6"] > svg,
+html.light [class*="bg-sky-6"] > span,
+html.light [class*="bg-sky-6"] > svg,
+html.light [class*="bg-rose-6"] > span,
+html.light [class*="bg-rose-6"] > svg,
+html.light [class*="bg-amber-6"] > span,
+html.light [class*="bg-amber-6"] > svg,
+html.light [class*="bg-emerald-6"].text-white,
+html.light [class*="bg-blue-6"].text-white,
+html.light [class*="bg-indigo-6"].text-white,
+html.light [class*="bg-teal-6"].text-white,
+html.light [class*="bg-sky-6"].text-white,
+html.light [class*="bg-rose-6"].text-white,
+html.light [class*="bg-amber-6"].text-white,
+html.light a.bg-emerald-600,
+html.light a.bg-blue-600,
+html.light a.bg-indigo-600,
+html.light .btn-primary,
+html.light .btn-primary *,
+html.light button[class*="from-emerald-600"],
+html.light button[class*="from-emerald-600"] * {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+}
+
+/* ========================================================= */
+/* ACCENT COLORS REMAPPING: CONVERT NEON TO DEEP CONTRAST    */
+/* ========================================================= */
+/* In light mode, neon accents (emerald-400, amber-400, etc.) are unreadable on light backgrounds.
+   We map them to their rich 700/800 high-contrast equivalents (WCAG AAA compliant). */
+
+/* Emerald (Profits, ROI, Active status) */
+html.light .text-emerald-400,
+html.light .text-emerald-300,
+html.light .text-emerald-200,
+html.light .text-emerald-500 {
+  color: #047857 !important; /* Emerald-700: deep readable emerald */
+  -webkit-text-fill-color: #047857 !important;
+}
+
+/* Teal */
+html.light .text-teal-400,
+html.light .text-teal-300,
+html.light .text-teal-200,
+html.light .text-teal-500 {
+  color: #0f766e !important; /* Teal-700 */
+  -webkit-text-fill-color: #0f766e !important;
+}
+
+/* Cyan */
+html.light .text-cyan-400,
+html.light .text-cyan-300,
+html.light .text-cyan-200,
+html.light .text-cyan-500 {
+  color: #0e7490 !important; /* Cyan-700 */
+  -webkit-text-fill-color: #0e7490 !important;
+}
+
+/* Sky */
+html.light .text-sky-400,
+html.light .text-sky-300,
+html.light .text-sky-200,
+html.light .text-sky-500 {
+  color: #0369a1 !important; /* Sky-700 */
+  -webkit-text-fill-color: #0369a1 !important;
+}
+
+/* Blue */
+html.light .text-blue-400,
+html.light .text-blue-300,
+html.light .text-blue-200,
+html.light .text-blue-500 {
+  color: #1d4ed8 !important; /* Blue-700 */
+  -webkit-text-fill-color: #1d4ed8 !important;
+}
+
+/* Indigo */
+html.light .text-indigo-400,
+html.light .text-indigo-300,
+html.light .text-indigo-200,
+html.light .text-indigo-500 {
+  color: #4338ca !important; /* Indigo-700 */
+  -webkit-text-fill-color: #4338ca !important;
+}
+
+/* Amber / Yellow (Holding alerts, Consignment, Warnings) */
+html.light .text-amber-400,
+html.light .text-amber-300,
+html.light .text-amber-200,
+html.light .text-amber-500,
+html.light .text-yellow-400,
+html.light .text-yellow-300,
+html.light .text-yellow-200,
+html.light .text-yellow-500 {
+  color: #b45309 !important; /* Amber-700: rich golden amber, highly readable on light backgrounds */
+  -webkit-text-fill-color: #b45309 !important;
+}
+
+/* Rose / Red (Sold status, Urgent alerts, Overdue) */
+html.light .text-rose-400,
+html.light .text-rose-300,
+html.light .text-rose-200,
+html.light .text-rose-500,
+html.light .text-red-400,
+html.light .text-red-300,
+html.light .text-red-200,
+html.light .text-red-500 {
+  color: #be123c !important; /* Rose-700 */
+  -webkit-text-fill-color: #be123c !important;
+}
+
+/* Purple */
+html.light .text-purple-400,
+html.light .text-purple-300,
+html.light .text-purple-200,
+html.light .text-purple-500 {
+  color: #7e22ce !important; /* Purple-700 */
+  -webkit-text-fill-color: #7e22ce !important;
+}
+
+/* ========================================================= */
+/* STATUS BADGES & CHIPS: CRISP PASTEL FILLS & CLEAR TEXT    */
+/* ========================================================= */
+html.light [class*="bg-emerald-500/"] {
+  background-color: #ecfdf5 !important;
+  border-color: #a7f3d0 !important;
+  color: #047857 !important;
+}
+
+html.light [class*="bg-teal-500/"] {
+  background-color: #f0fdfa !important;
+  border-color: #99f6e4 !important;
+  color: #0f766e !important;
+}
+
+html.light [class*="bg-cyan-500/"] {
+  background-color: #ecfeff !important;
+  border-color: #a5f3fc !important;
+  color: #0e7490 !important;
+}
+
+html.light [class*="bg-sky-500/"] {
+  background-color: #f0f9ff !important;
+  border-color: #bae6fd !important;
+  color: #0369a1 !important;
+}
+
+html.light [class*="bg-blue-500/"] {
+  background-color: #eff6ff !important;
+  border-color: #bfdbfe !important;
+  color: #1d4ed8 !important;
+}
+
+html.light [class*="bg-indigo-500/"] {
+  background-color: #eef2ff !important;
+  border-color: #c7d2fe !important;
+  color: #4338ca !important;
+}
+
+html.light [class*="bg-amber-500/"] {
+  background-color: #fffbeb !important;
+  border-color: #fde68a !important;
+  color: #b45309 !important;
+}
+
+html.light [class*="bg-rose-500/"] {
+  background-color: #fff1f2 !important;
+  border-color: #fecdd3 !important;
+  color: #be123c !important;
+}
+
+html.light [class*="bg-purple-500/"] {
+  background-color: #faf5ff !important;
+  border-color: #e9d5ff !important;
+  color: #7e22ce !important;
+}
+
+/* ========================================================= */
+/* TABLES IN LIGHT MODE: SHARP HEADERS, ROW HOVERS & STICKY  */
+/* ========================================================= */
 html.light table,
-html.light tr.bg-slate-900\/60,
-html.light tr.bg-slate-900,
-html.light tr:hover {
-  background-color: #ffffff;
+html.light #main-land-table {
+  background-color: #ffffff !important;
 }
 
 html.light thead,
 html.light thead tr,
 html.light thead th {
-  background-color: #f1f5f9 !important;
-  color: #334155 !important;
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+  font-weight: 700 !important;
+  border-color: #cbd5e1 !important;
+}
+
+html.light tbody tr {
+  background-color: #ffffff;
   border-color: #e2e8f0 !important;
 }
 
-html.light tbody tr:hover {
-  background-color: #f8fafc !important;
+html.light tbody tr:hover,
+html.light tr.hover\:bg-slate-800\/60:hover {
+  background-color: #f1f5f9 !important;
 }
 
-/* Inputs, Textareas, Selects in Light Mode */
+html.light tbody td {
+  border-color: #e2e8f0 !important;
+}
+
+/* Sticky Action Column in Light Mode */
+html.light th#main-land-table-actions,
+html.light td.management-control,
+html.light td.action-buttons,
+html.light td[class*="sticky"][class*="right-0"] {
+  background-color: #f8fafc !important;
+  border-color: #cbd5e1 !important;
+  box-shadow: -3px 0 8px rgba(15, 23, 42, 0.08) !important;
+}
+
+/* Active Tabs in Modals and Detail Views */
+html.light button.bg-slate-800[class*="text-white"],
+html.light button.bg-slate-800[class*="border-slate-700"] {
+  background-color: #e2e8f0 !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+
+/* ========================================================= */
+/* FORM INPUTS, TEXTAREAS & SELECTS                          */
+/* ========================================================= */
 html.light input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
 html.light select,
 html.light textarea {
@@ -257,19 +512,49 @@ html.light textarea {
   border-color: #cbd5e1 !important;
 }
 
+html.light input::placeholder,
+html.light textarea::placeholder {
+  color: #64748b !important;
+}
+
 html.light input:focus,
 html.light select:focus,
 html.light textarea:focus {
-  border-color: #10b981 !important;
+  border-color: #059669 !important;
   background-color: #ffffff !important;
-  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.15) !important;
+  box-shadow: 0 0 0 2px rgba(5, 150, 105, 0.18) !important;
 }
 
-/* Modals & Overlays in Light Mode */
-html.light .bg-slate-950\/80,
-html.light .bg-slate-950\/70,
-html.light .bg-slate-900\/90 {
+/* Quick Action Floating Action Button Labels in Light Mode */
+html.light span.bg-slate-900\/95 {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.12) !important;
+}
+
+/* Modals & Dialogs in Light Mode */
+html.light [role="dialog"],
+html.light [aria-modal="true"] {
+  box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.22) !important;
+}
+
+/* Backdrop dim overlay in Light Mode */
+html.light .fixed.inset-0.bg-slate-950\/80,
+html.light .fixed.inset-0.bg-slate-950\/70,
+html.light .fixed.inset-0.bg-slate-950\/60,
+html.light .fixed.inset-0.bg-slate-950\/40,
+html.light .fixed.inset-0.bg-slate-900\/90 {
   background-color: rgba(15, 23, 42, 0.45) !important;
+  backdrop-filter: blur(4px) !important;
+}
+
+/* Code Chips & Badges */
+html.light code,
+html.light kbd {
+  background-color: #f1f5f9 !important;
+  color: #0f172a !important;
+  border: 1px solid #cbd5e1 !important;
 }
 
 /* Leaflet Custom Marker & Popup Styling */

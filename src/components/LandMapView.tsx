@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 import L from 'leaflet';
 import { 
   MapPin, 
@@ -21,9 +21,14 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
+  ChevronLeft,
+  ChevronRight,
   Mountain,
   Satellite,
-  Map as MapIcon
+  Map as MapIcon,
+  TrendingUp,
+  SlidersHorizontal,
+  CheckSquare
 } from 'lucide-react';
 import { LandPlot, LandStatus } from '../types/land';
 import { formatCurrency, formatThaiArea } from '../services/storage';
@@ -43,7 +48,7 @@ export const STATUS_CONFIGS: StatusConfig[] = [
   {
     key: 'holding',
     label: 'ถือครอง',
-    subLabel: 'พร้อมพัฒนา',
+    subLabel: 'Holding',
     dotColor: 'bg-emerald-500',
     borderColor: 'border-emerald-300',
     textColor: 'text-emerald-400',
@@ -62,8 +67,8 @@ export const STATUS_CONFIGS: StatusConfig[] = [
   },
   {
     key: 'consignment',
-    label: 'รับขายฝาก',
-    subLabel: 'จำนอง/ฝาก',
+    label: 'รับขายฝาก / รอดำเนินการ',
+    subLabel: 'Pending / Consignment',
     dotColor: 'bg-amber-500',
     borderColor: 'border-amber-300',
     textColor: 'text-amber-400',
@@ -72,8 +77,8 @@ export const STATUS_CONFIGS: StatusConfig[] = [
   },
   {
     key: 'sold',
-    label: 'ขายแล้ว',
-    subLabel: 'ปิดดีลสำเร็จ',
+    label: 'ปิดการขาย',
+    subLabel: 'Sold',
     dotColor: 'bg-rose-500',
     borderColor: 'border-rose-300',
     textColor: 'text-rose-400',
@@ -194,18 +199,40 @@ export const LandMapView: React.FC<LandMapViewProps> = ({
   const [selectedStatuses, setSelectedStatuses] = useState<Set<LandStatus>>(
     new Set(['holding', 'for_sale', 'consignment', 'sold'])
   );
-  const [isFilterPanelExpanded, setIsFilterPanelExpanded] = useState<boolean>(true);
+  const [isFilterSidebarOpen, setIsFilterSidebarOpen] = useState<boolean>(true);
+  const [searchQuery, setSearchQuery] = useState<string>('');
 
   // Filter plots that have valid coordinates
-  const plotsWithCoords = plots.filter(
-    (p) => typeof p.latitude === 'number' && typeof p.longitude === 'number' && !isNaN(p.latitude) && !isNaN(p.longitude)
-  );
+  const plotsWithCoords = useMemo(() => {
+    return plots.filter(
+      (p) => typeof p.latitude === 'number' && typeof p.longitude === 'number' && !isNaN(p.latitude) && !isNaN(p.longitude)
+    );
+  }, [plots]);
 
-  // Plot count per status among plots with coordinates
-  const statusCounts = ALL_STATUS_KEYS.reduce((acc, st) => {
-    acc[st] = plotsWithCoords.filter((p) => p.status === st).length;
-    return acc;
-  }, {} as Record<LandStatus, number>);
+  // Rich plot count, area, and financial statistics per status
+  const statusStats = useMemo(() => {
+    return ALL_STATUS_KEYS.reduce((acc, st) => {
+      const stPlots = plotsWithCoords.filter((p) => p.status === st);
+      const totalCost = stPlots.reduce((sum, p) => sum + (Number(p.totalCost) || 0), 0);
+      const totalSqWah = stPlots.reduce((sum, p) => sum + (Number(p.totalSqWah) || 0), 0);
+      const totalTarget = stPlots.reduce((sum, p) => sum + (Number(p.targetSalePrice) || 0), 0);
+      acc[st] = {
+        count: stPlots.length,
+        totalCost,
+        totalSqWah,
+        totalTarget,
+      };
+      return acc;
+    }, {} as Record<LandStatus, { count: number; totalCost: number; totalSqWah: number; totalTarget: number }>);
+  }, [plotsWithCoords]);
+
+  // Backward compatibility statusCounts
+  const statusCounts = useMemo(() => {
+    return ALL_STATUS_KEYS.reduce((acc, st) => {
+      acc[st] = statusStats[st].count;
+      return acc;
+    }, {} as Record<LandStatus, number>);
+  }, [statusStats]);
 
   const toggleStatus = (status: LandStatus) => {
     setSelectedStatuses((prev) => {
@@ -235,11 +262,67 @@ export const LandMapView: React.FC<LandMapViewProps> = ({
     setSelectedStatus(status);
   };
 
-  const filteredPlots = plotsWithCoords.filter((p) => {
-    const matchProv = selectedProvince === 'all' || p.province === selectedProvince;
-    const matchStatus = selectedStatuses.has(p.status);
-    return matchProv && matchStatus;
-  });
+  const invertStatusSelection = () => {
+    setSelectedStatuses((prev) => {
+      const next = new Set<LandStatus>();
+      ALL_STATUS_KEYS.forEach((k) => {
+        if (!prev.has(k)) {
+          next.add(k);
+        }
+      });
+      return next;
+    });
+  };
+
+  const hideAllStatuses = () => {
+    setSelectedStatuses(new Set());
+  };
+
+  const filteredPlots = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return plotsWithCoords.filter((p) => {
+      const matchProv = selectedProvince === 'all' || p.province === selectedProvince;
+      const matchStatus = selectedStatuses.has(p.status);
+      const matchSearch =
+        !q ||
+        p.title?.toLowerCase().includes(q) ||
+        p.primaryDeedNumber?.toLowerCase().includes(q) ||
+        p.subdistrict?.toLowerCase().includes(q) ||
+        p.district?.toLowerCase().includes(q) ||
+        p.province?.toLowerCase().includes(q) ||
+        p.orderNumber?.toString().includes(q);
+      return matchProv && matchStatus && matchSearch;
+    });
+  }, [plotsWithCoords, selectedProvince, selectedStatuses, searchQuery]);
+
+  // Aggregate stats of currently visible plots on the map
+  const visibleStats = useMemo(() => {
+    const totalCost = filteredPlots.reduce((sum, p) => sum + (Number(p.totalCost) || 0), 0);
+    const totalSqWah = filteredPlots.reduce((sum, p) => sum + (Number(p.totalSqWah) || 0), 0);
+    const totalTarget = filteredPlots.reduce((sum, p) => sum + (Number(p.targetSalePrice) || 0), 0);
+    const rai = Math.floor(totalSqWah / 400);
+    const ngan = Math.floor((totalSqWah % 400) / 100);
+    const sqWah = Math.round((totalSqWah % 100) * 10) / 10;
+    return {
+      totalCost,
+      totalSqWah,
+      totalTarget,
+      area: { rai, ngan, sqWah },
+    };
+  }, [filteredPlots]);
+
+  const handleFitAllMarkers = () => {
+    if (!mapInstanceRef.current) return;
+    const bounds = L.latLngBounds([]);
+    filteredPlots.forEach((plot) => {
+      if (plot.latitude && plot.longitude) {
+        bounds.extend([plot.latitude, plot.longitude]);
+      }
+    });
+    if (bounds.isValid()) {
+      mapInstanceRef.current.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 });
+    }
+  };
 
   const provinces = Array.from(new Set(plots.map((p) => p.province).filter(Boolean)));
 
@@ -661,186 +744,328 @@ export const LandMapView: React.FC<LandMapViewProps> = ({
             className={
               isFullscreen
                 ? "fixed inset-0 z-40 bg-slate-950 w-screen h-screen flex flex-col overflow-hidden"
-                : "lg:col-span-8 xl:col-span-9 rounded-2xl overflow-hidden border border-slate-800 bg-slate-950 relative shadow-2xl h-[560px]"
+                : "lg:col-span-8 xl:col-span-9 rounded-2xl overflow-hidden border border-slate-800 bg-slate-950 relative shadow-2xl h-[620px]"
             }
           >
             <div ref={mapContainerRef} className="w-full h-full z-10" />
 
-            {/* Quick Filter Panel - Floating directly on the map interface */}
-            <div 
-              className="absolute top-4 left-4 z-20 pointer-events-auto max-w-[calc(100%-2rem)] sm:max-w-xs transition-all duration-200"
-              onClick={(e) => e.stopPropagation()}
-              onMouseDown={(e) => e.stopPropagation()}
-              onDoubleClick={(e) => e.stopPropagation()}
-              onWheel={(e) => e.stopPropagation()}
-            >
-              {isFilterPanelExpanded ? (
-                <div className="bg-slate-900/95 backdrop-blur-md p-3.5 rounded-2xl border border-slate-700/80 shadow-2xl text-xs space-y-3 w-72">
-                  {/* Panel Header */}
-                  <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-                    <div className="flex items-center gap-2">
-                      <div className="w-6 h-6 rounded-lg bg-emerald-500/15 text-emerald-400 flex items-center justify-center border border-emerald-500/30">
-                        <Filter className="w-3.5 h-3.5" />
-                      </div>
-                      <div>
-                        <div className="font-bold text-slate-100 text-xs flex items-center gap-1.5">
-                          <span>ตัวกรองด่วน (Quick Filter)</span>
-                        </div>
-                        <div className="text-[10px] text-slate-400">
-                          เปิด/ปิดแสดงหมุดตามสถานะ
-                        </div>
-                      </div>
+            {/* ========================================================= */}
+            {/* FILTER SIDEBAR: DOCKED DIRECTLY ON THE MAP INTERFACE       */}
+            {/* ========================================================= */}
+            {isFilterSidebarOpen ? (
+              <div 
+                className="absolute top-0 left-0 bottom-0 z-20 w-80 sm:w-88 max-w-[88vw] bg-slate-900/95 backdrop-blur-md border-r border-slate-700/80 shadow-2xl flex flex-col pointer-events-auto transition-all duration-200 overflow-hidden"
+                onClick={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+                onDoubleClick={(e) => e.stopPropagation()}
+                onWheel={(e) => e.stopPropagation()}
+              >
+                {/* Sidebar Header */}
+                <div className="p-3.5 border-b border-slate-800 flex items-center justify-between shrink-0 bg-slate-900/80">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-lg bg-emerald-500/15 text-emerald-400 flex items-center justify-center border border-emerald-500/30">
+                      <Filter className="w-4 h-4" />
                     </div>
+                    <div>
+                      <h3 className="font-bold text-slate-100 text-xs flex items-center gap-1.5">
+                        <span>ตัวกรองสถานะที่ดิน</span>
+                      </h3>
+                      <p className="text-[10px] text-slate-400">
+                        เปิด/ปิดหมุดบนแผนที่ได้ทันที
+                      </p>
+                    </div>
+                  </div>
 
-                    <div className="flex items-center gap-1.5">
-                      <span 
-                        className="font-mono text-[10px] px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-emerald-400 font-semibold"
-                        title="หมุดที่แสดงอยู่ / ทั้งหมดที่มีพิกัด"
-                      >
-                        {filteredPlots.length}/{plotsWithCoords.length}
-                      </span>
+                  <div className="flex items-center gap-1.5">
+                    <span 
+                      className="font-mono text-[10px] px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-emerald-400 font-semibold"
+                      title="หมุดที่แสดงอยู่ / ทั้งหมดที่มีพิกัด"
+                    >
+                      {filteredPlots.length}/{plotsWithCoords.length}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setIsFilterSidebarOpen(false)}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer"
+                      title="ย่อแถบตัวกรอง (Collapse Sidebar)"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Scrollable Content Body */}
+                <div className="overflow-y-auto flex-1 p-3.5 space-y-3 scrollbar-thin">
+                  {/* Preset Quick Actions Bar */}
+                  <div>
+                    <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block mb-1">
+                      ทางลัดสถานะ (Presets)
+                    </label>
+                    <div className="grid grid-cols-4 gap-1 p-1 bg-slate-950/70 rounded-xl border border-slate-800/80 text-[10px]">
                       <button
                         type="button"
-                        onClick={() => setIsFilterPanelExpanded(false)}
-                        className="p-1 rounded-md text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer"
-                        title="ย่อแถบตัวกรอง"
+                        onClick={selectAllStatuses}
+                        className={`py-1 px-1 rounded-lg font-medium text-center transition-colors cursor-pointer ${
+                          selectedStatuses.size === ALL_STATUS_KEYS.length
+                            ? 'bg-emerald-600 text-white font-semibold shadow-sm'
+                            : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                        }`}
+                        title="แสดงทุกสถานะ"
                       >
-                        <ChevronUp className="w-3.5 h-3.5" />
+                        ทั้งหมด
+                      </button>
+                      <button
+                        type="button"
+                        onClick={selectActiveOnly}
+                        className={`py-1 px-1 rounded-lg font-medium text-center transition-colors cursor-pointer ${
+                          selectedStatuses.size === 3 && !selectedStatuses.has('sold')
+                            ? 'bg-emerald-600 text-white font-semibold shadow-sm'
+                            : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                        }`}
+                        title="เฉพาะแปลงที่ยังไม่ได้ขาย (ถือครอง, ประกาศขาย, ขายฝาก)"
+                      >
+                        ยังไม่ขาย
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => selectOnlyStatus('sold')}
+                        className={`py-1 px-1 rounded-lg font-medium text-center transition-colors cursor-pointer ${
+                          selectedStatuses.size === 1 && selectedStatuses.has('sold')
+                            ? 'bg-rose-600 text-white font-semibold shadow-sm'
+                            : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                        }`}
+                        title="เฉพาะแปลงที่ขายแล้ว"
+                      >
+                        ขายแล้ว
+                      </button>
+                      <button
+                        type="button"
+                        onClick={invertStatusSelection}
+                        className="py-1 px-1 rounded-lg font-medium text-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 transition-colors cursor-pointer"
+                        title="สลับการเลือกสถานะ"
+                      >
+                        สลับเลือก
                       </button>
                     </div>
                   </div>
 
-                  {/* Preset Quick Toggles */}
-                  <div className="grid grid-cols-3 gap-1 p-1 bg-slate-950/60 rounded-xl border border-slate-800/80 text-[10px]">
-                    <button
-                      type="button"
-                      onClick={selectAllStatuses}
-                      className={`py-1 px-1.5 rounded-lg font-medium text-center transition-colors cursor-pointer ${
-                        selectedStatuses.size === ALL_STATUS_KEYS.length
-                          ? 'bg-emerald-600 text-white font-semibold shadow-sm'
-                          : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-                      }`}
-                    >
-                      ทั้งหมด
-                    </button>
-                    <button
-                      type="button"
-                      onClick={selectActiveOnly}
-                      className={`py-1 px-1.5 rounded-lg font-medium text-center transition-colors cursor-pointer ${
-                        selectedStatuses.size === 3 && !selectedStatuses.has('sold')
-                          ? 'bg-emerald-600 text-white font-semibold shadow-sm'
-                          : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-                      }`}
-                      title="ซ่อนแปลงที่ขายแล้ว"
-                    >
-                      เฉพาะยังไม่ขาย
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => selectOnlyStatus('sold')}
-                      className={`py-1 px-1.5 rounded-lg font-medium text-center transition-colors cursor-pointer ${
-                        selectedStatuses.size === 1 && selectedStatuses.has('sold')
-                          ? 'bg-rose-600 text-white font-semibold shadow-sm'
-                          : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-                      }`}
-                    >
-                      ขายแล้ว
-                    </button>
-                  </div>
+                  {/* Status Toggle Rows */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">
+                        เลือกสถานะที่ต้องการแสดง
+                      </label>
+                      {selectedStatuses.size > 0 && selectedStatuses.size < ALL_STATUS_KEYS.length && (
+                        <button
+                          type="button"
+                          onClick={selectAllStatuses}
+                          className="text-[10px] text-emerald-400 hover:text-emerald-300 transition-colors cursor-pointer"
+                        >
+                          เปิดทั้งหมด
+                        </button>
+                      )}
+                    </div>
 
-                  {/* Status Toggle Item Rows */}
-                  <div className="space-y-1.5">
                     {STATUS_CONFIGS.map((cfg) => {
                       const isVisible = selectedStatuses.has(cfg.key);
-                      const count = statusCounts[cfg.key] || 0;
+                      const stats = statusStats[cfg.key] || { count: 0, totalCost: 0, totalSqWah: 0, totalTarget: 0 };
                       return (
-                        <button
+                        <div
                           key={cfg.key}
-                          type="button"
                           onClick={() => toggleStatus(cfg.key)}
-                          className={`w-full text-left px-2.5 py-2 rounded-xl transition-all flex items-center justify-between border cursor-pointer group ${
+                          className={`p-2.5 rounded-xl transition-all border cursor-pointer select-none group relative ${
                             isVisible
-                              ? `${cfg.activeBg} shadow-sm`
-                              : 'bg-slate-950/40 border-slate-800/60 text-slate-500 opacity-60 hover:opacity-85 hover:bg-slate-800/40'
+                              ? `${cfg.activeBg} shadow-sm ring-1 ring-emerald-500/20`
+                              : 'bg-slate-950/40 border-slate-800/60 opacity-60 hover:opacity-85 hover:bg-slate-800/40'
                           }`}
                         >
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            {/* Color Pin Indicator */}
-                            <div className="relative flex items-center justify-center shrink-0">
+                          <div className="flex items-center justify-between gap-2 mb-1.5">
+                            <div className="flex items-center gap-2 min-w-0">
+                              {/* Pin Dot indicator with glowing ring */}
                               <span
-                                className={`w-3.5 h-3.5 rounded-full border-2 ${cfg.dotColor} ${cfg.borderColor} transition-transform group-hover:scale-110 ${
-                                  !isVisible ? 'grayscale opacity-30 border-slate-600' : ''
+                                className={`w-3.5 h-3.5 rounded-full border-2 shrink-0 ${cfg.dotColor} ${cfg.borderColor} transition-transform group-hover:scale-110 ${
+                                  !isVisible ? 'grayscale opacity-30 border-slate-600' : 'ring-2 ring-white/20'
                                 }`}
                               />
-                            </div>
-
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-1.5">
-                                <span className={`text-xs font-semibold truncate ${isVisible ? 'text-slate-100' : 'text-slate-400 line-through'}`}>
+                              <div className="min-w-0">
+                                <span className={`text-xs font-bold truncate block ${isVisible ? 'text-slate-100' : 'text-slate-400 line-through'}`}>
                                   {cfg.label}
                                 </span>
-                                <span className="text-[10px] text-slate-400">
-                                  ({cfg.subLabel})
+                                <span className="text-[10px] text-slate-400 block -mt-0.5">
+                                  {cfg.subLabel}
                                 </span>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {/* Quick "Only" button on hover */}
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  selectOnlyStatus(cfg.key);
+                                }}
+                                className="text-[9px] px-1.5 py-0.5 rounded bg-slate-800/80 hover:bg-emerald-600 text-slate-400 hover:text-white transition-colors cursor-pointer border border-slate-700/60 opacity-0 group-hover:opacity-100"
+                                title={`แสดงเฉพาะสถานะ "${cfg.label}" เท่านั้น`}
+                              >
+                                เดี่ยว
+                              </button>
+
+                              {/* Interactive iOS style Toggle Switch */}
+                              <div
+                                className={`w-8 h-4.5 flex items-center rounded-full p-0.5 transition-colors cursor-pointer shrink-0 ${
+                                  isVisible ? 'bg-emerald-500 shadow-sm' : 'bg-slate-700'
+                                }`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleStatus(cfg.key);
+                                }}
+                                title={isVisible ? 'คลิกเพื่อปิดสถานะนี้' : 'คลิกเพื่อเปิดสถานะนี้'}
+                              >
+                                <div
+                                  className={`bg-white w-3.5 h-3.5 rounded-full shadow transform transition-transform duration-200 ${
+                                    isVisible ? 'translate-x-3.5' : 'translate-x-0'
+                                  }`}
+                                />
                               </div>
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-2 shrink-0">
-                            <span
-                              className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${
-                                isVisible
-                                  ? cfg.badgeBg
-                                  : 'bg-slate-800/60 text-slate-500 border-slate-700/40'
-                              }`}
-                            >
-                              {count} แปลง
+                          {/* Status Meta Breakdown (Count & Financials) */}
+                          <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1.5 border-t border-slate-800/60 font-mono">
+                            <span className="font-semibold text-slate-300">
+                              {stats.count} แปลง ({stats.totalSqWah.toLocaleString('th-TH')} ตร.ว.)
                             </span>
-
-                            <div className="text-slate-400 group-hover:text-slate-200 transition-colors">
-                              {isVisible ? (
-                                <Eye className="w-3.5 h-3.5 text-emerald-400" />
-                              ) : (
-                                <EyeOff className="w-3.5 h-3.5 text-slate-500" />
-                              )}
-                            </div>
+                            <span className={isVisible ? cfg.textColor : 'text-slate-500'}>
+                              {cfg.key === 'for_sale' && stats.totalTarget > 0 
+                                ? `เป้า ${formatCurrency(stats.totalTarget)}`
+                                : formatCurrency(stats.totalCost)}
+                            </span>
                           </div>
-                        </button>
+                        </div>
                       );
                     })}
                   </div>
 
-                  {/* Panel Footer / Quick Reset */}
-                  <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-[10px] text-slate-400">
-                    <span>
-                      {selectedStatuses.size === 0 ? (
-                        <span className="text-amber-400 font-medium">⚠️ ซ่อนหมุดทั้งหมด</span>
-                      ) : (
-                        <span>แสดง {selectedStatuses.size}/4 สถานะ</span>
+                  {/* Filter by Search in Map */}
+                  <div className="space-y-1 pt-1">
+                    <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">
+                      ค้นหาแปลงบนแผนที่
+                    </label>
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <input
+                        type="text"
+                        placeholder="ค้นหาชื่อแปลง, เลขโฉนด, อำเภอ..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="w-full pl-8 pr-7 py-1.5 bg-slate-950/80 border border-slate-700/80 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition-all"
+                      />
+                      {searchQuery && (
+                        <button
+                          type="button"
+                          onClick={() => setSearchQuery('')}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-0.5 cursor-pointer"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
                       )}
-                    </span>
-                    {selectedStatuses.size < ALL_STATUS_KEYS.length && (
-                      <button
-                        type="button"
-                        onClick={selectAllStatuses}
-                        className="text-emerald-400 hover:text-emerald-300 font-medium flex items-center gap-1 cursor-pointer transition-colors"
-                      >
-                        <RotateCcw className="w-3 h-3" /> เปิดทั้งหมด
-                      </button>
-                    )}
+                    </div>
+                  </div>
+
+                  {/* Filter by Province */}
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">
+                      พื้นที่ / จังหวัด
+                    </label>
+                    <select
+                      value={selectedProvince}
+                      onChange={(e) => setSelectedProvince(e.target.value)}
+                      className="w-full px-2.5 py-1.5 bg-slate-950/80 border border-slate-700/80 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-emerald-500 cursor-pointer"
+                    >
+                      <option value="all">🇹🇭 ทุกจังหวัด ({plotsWithCoords.length} แปลง)</option>
+                      {provinces.map((prov) => {
+                        const count = plotsWithCoords.filter(p => p.province === prov).length;
+                        return (
+                          <option key={prov} value={prov}>
+                            📍 {prov} ({count} แปลง)
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+
+                  {/* Visible Plots Financial Impact Summary */}
+                  <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800/90 text-[11px] space-y-1.5">
+                    <div className="flex items-center justify-between font-bold text-slate-200">
+                      <span className="flex items-center gap-1.5">
+                        <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
+                        สรุปข้อมูลหมุดที่แสดง:
+                      </span>
+                      <span className="font-mono text-emerald-400 font-bold">
+                        {filteredPlots.length} / {plotsWithCoords.length} แปลง
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-slate-400">
+                      <span>ต้นทุนรวมทั้งสิ้น:</span>
+                      <span className="font-mono font-semibold text-slate-200">
+                        {formatCurrency(visibleStats.totalCost)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-slate-400">
+                      <span>เนื้อที่ดินรวม:</span>
+                      <span className="font-mono text-slate-300">
+                        {visibleStats.area.rai} ไร่ {visibleStats.area.ngan} งาน {visibleStats.area.sqWah} วา
+                      </span>
+                    </div>
                   </div>
                 </div>
-              ) : (
-                /* Collapsed View: Floating Pill Trigger */
-                <button
-                  type="button"
-                  onClick={() => setIsFilterPanelExpanded(true)}
-                  className="bg-slate-900/95 hover:bg-slate-800 text-slate-200 border border-slate-700/80 shadow-2xl backdrop-blur-md px-3 py-2 rounded-xl text-xs font-medium flex items-center gap-2.5 cursor-pointer transition-all hover:border-emerald-500/50 group"
-                  title="คลิกเพื่อเปิดแถบตัวกรองสถานะหมุดบนแผนที่"
-                >
-                  <Filter className="w-3.5 h-3.5 text-emerald-400 group-hover:scale-110 transition-transform" />
-                  <span className="font-semibold text-slate-100">ตัวกรองด่วน</span>
-                  <div className="flex items-center gap-1">
+
+                {/* Sidebar Footer Controls */}
+                <div className="p-3 border-t border-slate-800 flex items-center gap-2 shrink-0 bg-slate-900/80">
+                  <button
+                    type="button"
+                    onClick={handleFitAllMarkers}
+                    className="flex-1 py-1.5 px-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center justify-center gap-1.5 border border-slate-700 transition-colors cursor-pointer shadow-sm"
+                    title="ซูมแผนที่ให้ครอบคลุมทุกหมุดที่กำลังแสดง"
+                  >
+                    <Compass className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>ซูมพอดีหมุด</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      selectAllStatuses();
+                      setSelectedProvince('all');
+                      setSearchQuery('');
+                    }}
+                    className="py-1.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white text-xs border border-slate-700 transition-colors cursor-pointer flex items-center gap-1"
+                    title="รีเซ็ตตัวกรองทั้งหมดกลับเป็นค่าเริ่มต้น"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>รีเซ็ต</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* Collapsed Trigger Button docked at top-left */
+              <button
+                type="button"
+                onClick={() => setIsFilterSidebarOpen(true)}
+                className="absolute top-4 left-4 z-20 bg-slate-900/95 hover:bg-slate-800 text-slate-200 border border-slate-700/80 shadow-2xl backdrop-blur-md px-3.5 py-2.5 rounded-2xl text-xs font-medium flex items-center gap-2.5 cursor-pointer transition-all hover:border-emerald-500/50 group animate-in fade-in duration-150"
+                title="คลิกเพื่อเปิดแถบตัวกรองสถานะที่ดิน (Filter Sidebar)"
+              >
+                <div className="w-7 h-7 rounded-lg bg-emerald-500/15 text-emerald-400 flex items-center justify-center border border-emerald-500/30 group-hover:scale-105 transition-transform">
+                  <Filter className="w-4 h-4" />
+                </div>
+                <div className="text-left">
+                  <div className="font-bold text-slate-100 flex items-center gap-1.5">
+                    <span>ตัวกรองสถานะ</span>
+                    <span className="text-[10px] font-mono text-emerald-400 bg-slate-800 px-1.5 py-0.2 rounded-full border border-slate-700">
+                      {filteredPlots.length}/{plotsWithCoords.length}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1 mt-0.5">
                     {STATUS_CONFIGS.map((c) => (
                       <span
                         key={c.key}
@@ -849,14 +1074,14 @@ export const LandMapView: React.FC<LandMapViewProps> = ({
                         }`}
                       />
                     ))}
+                    <span className="text-[10px] text-slate-400 ml-1">
+                      {selectedStatuses.size === 4 ? 'ทุกสถานะ' : `${selectedStatuses.size}/4 สถานะ`}
+                    </span>
                   </div>
-                  <span className="font-mono text-[10px] bg-slate-800 px-1.5 py-0.5 rounded text-emerald-400 border border-slate-700 font-semibold">
-                    {filteredPlots.length}/{plotsWithCoords.length}
-                  </span>
-                  <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
-                </button>
-              )}
-            </div>
+                </div>
+                <ChevronRight className="w-4 h-4 text-slate-400 group-hover:translate-x-0.5 transition-transform" />
+              </button>
+            )}
 
             {/* Zero plots overlay message */}
             {filteredPlots.length === 0 && (
@@ -870,7 +1095,7 @@ export const LandMapView: React.FC<LandMapViewProps> = ({
                   </div>
                   <h4 className="font-bold text-white text-sm">ไม่พบหมุดที่ตรงกับตัวกรองที่เลือก</h4>
                   <p className="text-xs text-slate-400">
-                    สถานะทั้งหมดถูกปิดอยู่ หรือไม่มีแปลงที่ดินตรงกับจังหวัดที่เลือก
+                    สถานะทั้งหมดถูกปิดอยู่ หรือไม่มีแปลงที่ดินตรงกับคำค้นหา/จังหวัดที่เลือก
                   </p>
                   <button
                     type="button"
@@ -891,8 +1116,25 @@ export const LandMapView: React.FC<LandMapViewProps> = ({
               />
             )}
 
-            {/* Floating Map Controls Toolbar (Quick Regions, Drawer, Layers & Fullscreen) */}
+            {/* Floating Map Controls Toolbar (Quick Regions, Filter Sidebar Toggle, Drawer, Layers & Fullscreen) */}
             <div className="absolute top-4 right-4 z-30 pointer-events-auto flex items-center gap-2">
+              {/* Toggle Filter Sidebar Button */}
+              <button
+                type="button"
+                onClick={() => setIsFilterSidebarOpen(!isFilterSidebarOpen)}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border shadow-2xl backdrop-blur-md text-xs font-semibold transition-all cursor-pointer ${
+                  isFilterSidebarOpen
+                    ? 'bg-emerald-600 text-white border-emerald-400/80 shadow-emerald-500/20'
+                    : 'bg-slate-900/90 hover:bg-slate-800 text-slate-200 border-slate-700/80 hover:border-emerald-500/50'
+                }`}
+                title={isFilterSidebarOpen ? "ปิดแถบตัวกรองสถานะ" : "เปิดแถบตัวกรองสถานะที่ดิน (Filter Sidebar)"}
+              >
+                <Filter className="w-4 h-4 text-emerald-400" />
+                <span className="hidden sm:inline">ตัวกรองสถานะ</span>
+                <span className="font-mono text-[10px] px-1.5 py-0.2 rounded-full bg-slate-800 text-emerald-300 border border-slate-700">
+                  {selectedStatuses.size}/4
+                </span>
+              </button>
               {/* Region Quick Jump in Fullscreen Mode */}
               {isFullscreen && (
                 <div className="hidden lg:flex items-center gap-1 p-1 bg-slate-900/95 backdrop-blur-md rounded-xl border border-slate-700/80 shadow-2xl text-xs">
@@ -1171,7 +1413,7 @@ export const LandMapView: React.FC<LandMapViewProps> = ({
 
           {/* Right Sidebar: Plot Navigator List (Only shown when not in full-screen) */}
           {!isFullscreen && (
-            <div className="lg:col-span-4 xl:col-span-3 rounded-2xl border border-slate-800 bg-slate-900 p-4 flex flex-col h-[560px]">
+            <div className="lg:col-span-4 xl:col-span-3 rounded-2xl border border-slate-800 bg-slate-900 p-4 flex flex-col h-[620px]">
               <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-3">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
                   <Navigation className="w-3.5 h-3.5 text-emerald-400" />

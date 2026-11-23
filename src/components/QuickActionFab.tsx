@@ -65,13 +65,13 @@ export const QuickActionFab: React.FC<QuickActionFabProps> = ({
   return (
     <div 
       ref={containerRef} 
-      className="fixed bottom-6 right-6 z-40 print:hidden flex flex-col items-end select-none"
+      className="fixed bottom-6 right-6 z-40 print:hidden flex flex-col items-end select-none pointer-events-none"
     >
       {/* Dimmed backdrop when speed dial is open */}
       {isOpen && (
         <div 
           onClick={() => setIsOpen(false)}
-          className="fixed inset-0 bg-slate-950/40 backdrop-blur-[2px] transition-opacity duration-200 z-30"
+          className="fixed inset-0 bg-slate-950/40 backdrop-blur-[2px] transition-opacity duration-200 z-30 pointer-events-auto"
           aria-hidden="true"
         />
       )}
@@ -81,7 +81,7 @@ export const QuickActionFab: React.FC<QuickActionFabProps> = ({
         className={`flex flex-col items-end gap-3 mb-3 z-40 transition-all duration-200 ${
           isOpen 
             ? 'opacity-100 translate-y-0 pointer-events-auto' 
-            : 'opacity-0 translate-y-4 pointer-events-none'
+            : 'hidden'
         }`}
       >
         {/* Action 1: Add New Plot */}
@@ -159,7 +159,7 @@ export const QuickActionFab: React.FC<QuickActionFabProps> = ({
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className={`relative z-40 w-14 h-14 rounded-full flex items-center justify-center shadow-2xl transition-all duration-300 cursor-pointer active:scale-95 focus:outline-none focus:ring-4 focus:ring-emerald-500/30 ${
+        className={`pointer-events-auto relative z-40 w-14 h-14 rounded-full flex items-center justify-center shadow-2xl transition-all duration-300 cursor-pointer active:scale-95 focus:outline-none focus:ring-4 focus:ring-emerald-500/30 ${
           isOpen
             ? 'bg-slate-800 text-rose-400 border border-slate-700 rotate-90 scale-105 shadow-rose-500/10'
             : 'bg-gradient-to-tr from-emerald-600 via-teal-600 to-emerald-500 hover:from-emerald-500 hover:to-teal-400 text-white border border-emerald-400/40 shadow-emerald-600/40 hover:scale-105'

@@ -75,12 +75,12 @@ export const KPISimulator: React.FC<KPISimulatorProps> = ({
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 w-full max-w-full min-w-0">
       {/* Header */}
-      <div className="p-6 rounded-2xl bg-gradient-to-r from-emerald-950/60 via-slate-900 to-slate-900 border border-emerald-500/20 shadow-xl print:hidden">
+      <div className="p-5 sm:p-6 rounded-2xl kpi-hero-banner border shadow-xl print:hidden">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 mb-2">
+          <div className="min-w-0">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 mb-2">
               <Calculator className="w-3.5 h-3.5" /> KPI & Profit Margin Simulator
             </div>
             <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
@@ -105,9 +105,9 @@ export const KPISimulator: React.FC<KPISimulatorProps> = ({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 print:hidden">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 min-w-0 print:hidden">
         {/* Left Controls: Select Plot & Sliders */}
-        <div className="lg:col-span-5 space-y-6">
+        <div className="lg:col-span-5 space-y-6 min-w-0">
           <div className="p-5 rounded-xl bg-slate-900/80 border border-slate-800 space-y-5">
             <h3 className="font-semibold text-white text-sm flex items-center gap-2">
               <Building className="w-4 h-4 text-emerald-400" />
@@ -198,11 +198,12 @@ export const KPISimulator: React.FC<KPISimulatorProps> = ({
               {[20, 30, 40, 50, 75, 100].map((preset) => (
                 <button
                   key={preset}
+                  type="button"
                   onClick={() => setTargetMarginPercent(preset)}
-                  className={`px-2.5 py-1 rounded text-xs font-mono font-medium transition-colors cursor-pointer ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-mono transition-all cursor-pointer border ${
                     targetMarginPercent === preset
-                      ? 'bg-emerald-500 text-slate-950 font-bold'
-                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                      ? 'bg-emerald-600 text-white font-bold border-emerald-500 shadow-sm'
+                      : 'bg-slate-800 text-slate-200 border-slate-700 hover:bg-slate-700'
                   }`}
                 >
                   +{preset}%
@@ -283,16 +284,16 @@ export const KPISimulator: React.FC<KPISimulatorProps> = ({
               </div>
 
               {plotLandTax && (
-                <div className="p-3 rounded-xl bg-slate-950/60 border border-rose-500/20 space-y-2 text-xs">
+                <div className="p-3.5 rounded-xl bg-slate-950/80 border border-rose-500/30 space-y-2 text-xs">
                   <div className="flex justify-between items-center">
                     <span className="text-slate-400">ประเภทการใช้ประโยชน์:</span>
-                    <span className="font-semibold text-slate-200">
+                    <span className="font-semibold text-slate-100">
                       {TAX_USAGE_CONFIGS[plotLandTax.usageType].shortLabel}
                     </span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-slate-400">ภาษีประเมินต่อปี:</span>
-                    <span className="font-mono font-bold text-rose-300">
+                    <span className="font-mono font-bold text-rose-400">
                       {plotLandTax.annualTax === 0 ? '0 ฿ (ยกเว้น 50 ล้านแรก)' : `${formatCurrency(plotLandTax.annualTax)} / ปี`}
                     </span>
                   </div>
@@ -302,25 +303,25 @@ export const KPISimulator: React.FC<KPISimulatorProps> = ({
                       <span className="text-slate-400">ระยะเวลาถือครองจำลอง:</span>
                       <span className="font-mono text-emerald-400 font-semibold">{holdingPeriodMonths} เดือน</span>
                     </div>
-                    <div className="grid grid-cols-5 gap-1 pt-1">
+                    <div className="grid grid-cols-5 gap-1.5 pt-1">
                       {[6, 12, 18, 24, 36].map((m) => (
                         <button
                           key={m}
                           type="button"
                           onClick={() => setHoldingPeriodMonths(m)}
-                          className={`py-1 rounded text-center text-[10px] font-mono transition-colors cursor-pointer ${
+                          className={`py-1 rounded-md text-center text-[11px] font-mono transition-colors cursor-pointer border ${
                             holdingPeriodMonths === m
-                              ? 'bg-rose-500 text-white font-bold'
-                              : 'bg-slate-800 text-slate-400 hover:text-slate-200'
+                              ? 'bg-rose-600 text-white border-rose-500 font-bold shadow-xs'
+                              : 'bg-slate-800 text-slate-200 border-slate-700 hover:bg-slate-700'
                           }`}
                         >
                           {m} ด.
                         </button>
                       ))}
                     </div>
-                    <div className="flex justify-between items-center text-[11px] pt-1 text-slate-400">
+                    <div className="flex justify-between items-center text-[11px] pt-1 text-slate-300">
                       <span>ภาษีที่ดินสะสมตามระยะถือครอง:</span>
-                      <span className="font-mono font-bold text-rose-300">
+                      <span className="font-mono font-bold text-rose-400">
                         {formatCurrency(plotLandTax.accruedTaxForPeriod)}
                       </span>
                     </div>
@@ -332,9 +333,9 @@ export const KPISimulator: React.FC<KPISimulatorProps> = ({
         </div>
 
         {/* Right Output: Simulated KPI Cards & Save Action */}
-        <div className="lg:col-span-7 space-y-6">
-          <div className="p-6 rounded-xl bg-slate-900 border border-slate-800 space-y-6">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+        <div className="lg:col-span-7 space-y-6 min-w-0">
+          <div className="p-5 sm:p-6 rounded-xl bg-slate-900 border border-slate-800 space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-4 border-b border-slate-800">
               <div>
                 <span className="text-xs text-slate-400 uppercase tracking-wider font-semibold">
                   ผลลัพธ์การจำลองราคา (Projected Output)
@@ -343,14 +344,14 @@ export const KPISimulator: React.FC<KPISimulatorProps> = ({
                   ราคาขายแนะนำและผลตอบแทนสุทธิ
                 </h3>
               </div>
-              <span className="px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+              <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
                 กำไรคาดหวัง +{targetMarginPercent}%
               </span>
             </div>
 
             {/* Large Highlight Card */}
-            <div className="p-6 rounded-2xl bg-gradient-to-br from-emerald-950/70 via-slate-900 to-slate-900 border border-emerald-500/30 text-center relative overflow-hidden">
-              <div className="text-xs uppercase tracking-wider text-emerald-400 font-medium">
+            <div className="p-5 sm:p-6 rounded-2xl kpi-price-card border text-center relative overflow-hidden">
+              <div className="text-xs uppercase tracking-wider text-emerald-400 font-bold">
                 ราคาที่ควรตั้งขาย (Recommended Target Selling Price)
               </div>
               <div className="text-3xl sm:text-4xl font-black text-white tracking-tight mt-2 font-mono">
@@ -358,16 +359,16 @@ export const KPISimulator: React.FC<KPISimulatorProps> = ({
               </div>
 
               {/* Price per unit breakdown */}
-              <div className="grid grid-cols-2 gap-4 mt-4 pt-4 border-t border-emerald-500/20">
-                <div className="text-left bg-slate-900/60 p-3 rounded-lg border border-slate-800">
-                  <div className="text-[11px] text-slate-400">ราคาต่อตารางวา</div>
-                  <div className="text-base font-bold text-emerald-300 font-mono">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mt-4 pt-4 border-t border-emerald-500/25">
+                <div className="text-left bg-slate-900/90 p-3 rounded-lg border border-slate-700/80">
+                  <div className="text-[11px] text-slate-400 font-medium">ราคาต่อตารางวา</div>
+                  <div className="text-base font-bold text-emerald-400 font-mono">
                     {formatCurrency(pricePerSqWah)} / ตร.ว.
                   </div>
                 </div>
-                <div className="text-left bg-slate-900/60 p-3 rounded-lg border border-slate-800">
-                  <div className="text-[11px] text-slate-400">ราคาต่อไร่</div>
-                  <div className="text-base font-bold text-emerald-300 font-mono">
+                <div className="text-left bg-slate-900/90 p-3 rounded-lg border border-slate-700/80">
+                  <div className="text-[11px] text-slate-400 font-medium">ราคาต่อไร่</div>
+                  <div className="text-base font-bold text-emerald-400 font-mono">
                     {formatCurrency(pricePerRai)} / ไร่
                   </div>
                 </div>
@@ -375,60 +376,71 @@ export const KPISimulator: React.FC<KPISimulatorProps> = ({
             </div>
 
             {/* Financial Waterfall Breakdown */}
-            <div className="space-y-3 p-4 rounded-xl bg-slate-950/60 border border-slate-800/80">
-              <div className="text-xs font-semibold text-slate-300 mb-2">
+            <div className="space-y-3 p-4 rounded-xl bg-slate-950/80 border border-slate-800">
+              <div className="text-xs font-semibold text-slate-200 mb-2">
                 สรุปแจกแจงค่าใช้จ่ายและกำไรสุทธิ (Financial Waterfall):
               </div>
 
-              <div className="flex justify-between items-center text-xs py-1.5 border-b border-slate-800/60">
+              <div className="flex justify-between items-center text-xs py-1.5 border-b border-slate-800/80 gap-2">
                 <span className="text-slate-300">ราคาขายรวมที่ตั้งไว้:</span>
-                <span className="font-mono font-medium text-white">{formatCurrency(simulatedSellingPrice)}</span>
+                <span className="font-mono font-semibold text-white shrink-0">{formatCurrency(simulatedSellingPrice)}</span>
               </div>
 
-              <div className="flex justify-between items-center text-xs py-1.5 border-b border-slate-800/60 text-rose-400">
+              <div className="flex justify-between items-center text-xs py-1.5 border-b border-slate-800/80 text-rose-400 gap-2">
                 <span>หัก ค่าคอมมิชชั่นนายหน้า ({commissionRate}%):</span>
-                <span className="font-mono font-medium">-{formatCurrency(estimatedCommission)}</span>
+                <span className="font-mono font-semibold shrink-0">-{formatCurrency(estimatedCommission)}</span>
               </div>
 
-              <div className="flex justify-between items-center text-xs py-1.5 border-b border-slate-800/60 text-amber-400">
+              <div className="flex justify-between items-center text-xs py-1.5 border-b border-slate-800/80 text-amber-400 gap-2">
                 <span>หัก ประมาณการค่าภาษี/ค่าโอน ({taxRate}%):</span>
-                <span className="font-mono font-medium">-{formatCurrency(estimatedTax)}</span>
+                <span className="font-mono font-semibold shrink-0">-{formatCurrency(estimatedTax)}</span>
               </div>
 
               {includeLandTax && accruedLandTax > 0 && (
-                <div className="flex justify-between items-center text-xs py-1.5 border-b border-slate-800/60 text-rose-300">
+                <div className="flex justify-between items-center text-xs py-1.5 border-b border-slate-800/80 text-rose-400 gap-2">
                   <span className="flex items-center gap-1">
-                    <Receipt className="w-3.5 h-3.5 text-rose-400" />
+                    <Receipt className="w-3.5 h-3.5 text-rose-400 shrink-0" />
                     หัก ภาษีที่ดินและสิ่งปลูกสร้างสะสม ({holdingPeriodMonths} เดือน):
                   </span>
-                  <span className="font-mono font-medium">-{formatCurrency(accruedLandTax)}</span>
+                  <span className="font-mono font-semibold shrink-0">-{formatCurrency(accruedLandTax)}</span>
                 </div>
               )}
 
-              <div className="flex justify-between items-center text-xs py-1.5 border-b border-slate-800/60 text-slate-300">
+              <div className="flex justify-between items-center text-xs py-1.5 border-b border-slate-800/80 text-slate-200 gap-2">
                 <span>ยอดเงินสุทธิที่ได้รับหลังหักค่าใช้จ่าย:</span>
-                <span className="font-mono font-bold text-white">{formatCurrency(netProceeds)}</span>
+                <span className="font-mono font-bold text-white shrink-0">{formatCurrency(netProceeds)}</span>
               </div>
 
-              <div className="flex justify-between items-center text-xs py-1.5 border-b border-slate-800/60 text-slate-400">
+              <div className="flex justify-between items-center text-xs py-1.5 border-b border-slate-800/80 text-slate-400 gap-2">
                 <span>หัก ต้นทุนรวมซื้อทั้งสิ้น:</span>
-                <span className="font-mono font-medium">-{formatCurrency(totalCost)}</span>
+                <span className="font-mono font-semibold shrink-0">-{formatCurrency(totalCost)}</span>
               </div>
 
-              <div className="flex justify-between items-center text-sm py-2 bg-emerald-500/10 px-3 rounded-lg border border-emerald-500/20 font-bold">
-                <span className="text-emerald-400">กำไรสุทธิคาดการณ์ (Net Profit):</span>
-                <span className="font-mono text-emerald-300 text-base">+{formatCurrency(netProfit)}</span>
+              <div
+                className={`flex flex-wrap justify-between items-center gap-2 text-sm py-2.5 px-3.5 rounded-xl border font-bold ${
+                  netProfit >= 0 ? 'kpi-netprofit-positive' : 'kpi-netprofit-negative'
+                }`}
+              >
+                <span className={netProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
+                  กำไรสุทธิคาดการณ์ (Net Profit):
+                </span>
+                <span className={`font-mono text-base sm:text-lg ${netProfit >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
+                  {netProfit >= 0 ? `+${formatCurrency(netProfit)}` : formatCurrency(netProfit)}
+                </span>
               </div>
 
-              <div className="flex justify-between items-center text-xs px-3 text-slate-400">
+              <div className="flex justify-between items-center text-xs px-3.5 py-1 text-slate-300">
                 <span>อัตราผลตอบแทนสุทธิจริง (Net ROI %):</span>
-                <span className="font-mono font-bold text-emerald-400">{netROI.toFixed(1)}%</span>
+                <span className={`font-mono font-bold ${netROI >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {netROI.toFixed(1)}%
+                </span>
               </div>
             </div>
 
             {/* Save Button Action */}
             <div className="pt-2">
               <button
+                type="button"
                 onClick={handleApplyToPlot}
                 className="w-full py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-98"
               >

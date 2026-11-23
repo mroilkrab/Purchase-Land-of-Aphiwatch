@@ -38,7 +38,8 @@ import {
   Shield,
   ShieldAlert,
   KeyRound,
-  Lock
+  Lock,
+  Link2
 } from 'lucide-react';
 import { PortfolioSettings, LandPlot, UserRole, AuthorizedUser, AccessControlPolicy } from '../types/land';
 import { getUserRole, hasPermission, ROLE_DEFINITIONS, upsertAuthorizedUser, removeAuthorizedUser } from '../services/rbac';
@@ -79,6 +80,7 @@ import {
 import { runHybridSync, HybridSyncResult } from '../services/hybridStorage';
 import { GoogleApiStatusCard } from './GoogleApiStatusCard';
 import { LocalBackupRestoreCard } from './LocalBackupRestoreCard';
+import { SystemLinksManager } from './SystemLinksManager';
 
 interface SettingsAndBackupProps {
   settings: PortfolioSettings;
@@ -90,7 +92,8 @@ interface SettingsAndBackupProps {
   onLoginGoogle: () => void;
   onNavigateToTable?: () => void;
   onOpenGoogleAuthTroubleshoot?: () => void;
-  initialTab?: 'storage' | 'csv' | 'general' | 'hybrid' | 'permissions';
+  initialTab?: 'storage' | 'links' | 'csv' | 'general' | 'hybrid' | 'permissions';
+  initialTabNonce?: number;
 }
 
 export const SettingsAndBackup: React.FC<SettingsAndBackupProps> = ({
@@ -104,6 +107,7 @@ export const SettingsAndBackup: React.FC<SettingsAndBackupProps> = ({
   onNavigateToTable,
   onOpenGoogleAuthTroubleshoot,
   initialTab,
+  initialTabNonce,
 }) => {
   const [formData, setFormData] = useState<PortfolioSettings>(settings);
   const [existingSheetId, setExistingSheetId] = useState(settings.googleSheetId || '');
@@ -111,7 +115,7 @@ export const SettingsAndBackup: React.FC<SettingsAndBackupProps> = ({
   const [sheetSuccessUrl, setSheetSuccessUrl] = useState<string | null>(null);
   const [sheetError, setSheetError] = useState<string | null>(null);
 
-  const [activeSettingsTab, setActiveSettingsTab] = useState<'storage' | 'csv' | 'general' | 'hybrid' | 'permissions'>(
+  const [activeSettingsTab, setActiveSettingsTab] = useState<'storage' | 'links' | 'csv' | 'general' | 'hybrid' | 'permissions'>(
     initialTab || 'storage'
   );
   const [isRunningDiagnostic, setIsRunningDiagnostic] = useState(false);
@@ -130,7 +134,12 @@ export const SettingsAndBackup: React.FC<SettingsAndBackupProps> = ({
     if (initialTab) {
       setActiveSettingsTab(initialTab);
     }
-  }, [initialTab]);
+  }, [initialTab, initialTabNonce]);
+
+  useEffect(() => {
+    setFormData(settings);
+    setExistingSheetId(settings.googleSheetId || '');
+  }, [settings]);
 
   const [storageDiagnostics, setStorageDiagnostics] = useState<{
     indexedDbOk: boolean;
@@ -802,6 +811,19 @@ export const SettingsAndBackup: React.FC<SettingsAndBackupProps> = ({
         >
           <Database className="w-4 h-4 text-emerald-300" />
           <span>แหล่งจัดเก็บ & ซิงค์คลาวด์ (Data & Storage)</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveSettingsTab('links')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer whitespace-nowrap ${
+            activeSettingsTab === 'links'
+              ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/30'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+          }`}
+        >
+          <Link2 className="w-4 h-4 text-emerald-400" />
+          <span>จัดการลิงก์ระบบ (System Links)</span>
         </button>
 
         <button
@@ -1638,6 +1660,22 @@ export const SettingsAndBackup: React.FC<SettingsAndBackupProps> = ({
         </div>
       </div>
     )}
+
+      {/* Tab: System Links Manager (อัปเดตและจัดการลิงก์ระบบที่ใช้งานได้จริง) */}
+      {activeSettingsTab === 'links' && (
+        <SystemLinksManager
+          settings={formData}
+          onUpdateSettings={(updated) => {
+            setFormData(updated);
+            onUpdateSettings(updated);
+          }}
+          d1Config={d1Config}
+          onUpdateD1Config={(updatedD1) => {
+            setD1Config(updatedD1);
+            saveD1Config(updatedD1);
+          }}
+        />
+      )}
 
       {/* Tab 3: System Font Size & Display (ขนาดตัวอักษรของระบบ) */}
       {activeSettingsTab === 'general' && (

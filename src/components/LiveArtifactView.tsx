@@ -11,11 +11,17 @@ import {
   Wallet, 
   MapPin, 
   Calendar,
-  Share2
+  Share2,
+  ExternalLink
 } from 'lucide-react';
 import { LandPlot, KPIStats, PortfolioSettings } from '../types/land';
 import { formatCurrency, formatThaiArea } from '../services/storage';
 import { triggerPrint } from '../utils/print';
+import {
+  buildGoogleSheetUrl,
+  copyTextSafely,
+  getPrimarySystemUrl,
+} from '../utils/systemLinks';
 
 interface LiveArtifactViewProps {
   plots: LandPlot[];
@@ -30,7 +36,10 @@ export const LiveArtifactView: React.FC<LiveArtifactViewProps> = ({
 }) => {
   const [copied, setCopied] = useState(false);
 
-  const handleCopySummary = () => {
+  const primarySystemUrl = getPrimarySystemUrl(settings);
+  const googleSheetUrl = buildGoogleSheetUrl(settings.googleSheetId);
+
+  const handleCopySummary = async () => {
     const textSummary = `[รายงานสรุปพอร์ตที่ดิน: ${settings.portfolioTitle || 'คุณอภิวัชร์'}]
 วันที่ออกรายงาน: ${new Date().toLocaleDateString('th-TH')}
 -----------------------------------------
@@ -43,10 +52,12 @@ export const LiveArtifactView: React.FC<LiveArtifactViewProps> = ({
 -----------------------------------------
 สรุปแปลงสำคัญ:
 ${plots.slice(0, 5).map((p) => `- แปลง #${p.orderNumber} ${p.title} (${p.province}) เนื้อที่ ${p.totalSqWah} ตร.ว. ต้นทุน ${formatCurrency(p.totalCost)}`).join('\n')}
-`;
-    navigator.clipboard.writeText(textSummary);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2500);
+${primarySystemUrl ? `\n🌐 ลิงก์เข้าใช้งานระบบ: ${primarySystemUrl}` : ''}${googleSheetUrl ? `\n📊 Google Sheets: ${googleSheetUrl}` : ''}`;
+    const ok = await copyTextSafely(textSummary);
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    }
   };
 
   const handlePrint = () => {
@@ -249,8 +260,20 @@ ${plots.slice(0, 5).map((p) => `- แปลง #${p.orderNumber} ${p.title} (${p
           <div>
             รายงานนี้สร้างขึ้นโดยอัตโนมัติจากระบบ Land Portfolio & KPI Analytics • จัดเก็บแบบ Hybrid Storage
           </div>
-          <div className="font-mono">
-            Generated Live Artifact • AI Studio Build
+          <div className="font-mono flex flex-wrap items-center gap-2">
+            {primarySystemUrl ? (
+              <a
+                href={primarySystemUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-emerald-400 print:text-slate-700 hover:underline inline-flex items-center gap-1 break-all"
+              >
+                <span>{primarySystemUrl}</span>
+                <ExternalLink className="w-3 h-3 print:hidden shrink-0" />
+              </a>
+            ) : (
+              <span>Generated Live Artifact</span>
+            )}
           </div>
         </div>
       </div>

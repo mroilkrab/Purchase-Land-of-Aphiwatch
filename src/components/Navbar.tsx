@@ -19,10 +19,22 @@ import {
   Check,
   Sun,
   Moon,
-  RefreshCw
+  RefreshCw,
+  Link2,
+  ExternalLink,
+  Copy,
+  FileSpreadsheet,
+  FolderSync
 } from 'lucide-react';
 import { PortfolioSettings, AppFontSize } from '../types/land';
+import { DEFAULT_SYSTEM_LINKS } from '../data/defaultLandData';
 import { getUserRole, ROLE_DEFINITIONS } from '../services/rbac';
+import {
+  buildGoogleSheetUrl,
+  copyTextSafely,
+  getPrimarySystemUrl,
+  normalizeSystemUrl,
+} from '../utils/systemLinks';
 
 interface NavbarProps {
   activeTab: 'dashboard' | 'table' | 'map' | 'reports' | 'simulator' | 'artifact' | 'settings';
@@ -43,6 +55,7 @@ interface NavbarProps {
     sheetUrl?: string;
     lastSynced?: string;
   } | null;
+  onOpenSystemLinks?: () => void;
 }
 
 const FONT_OPTIONS: { id: AppFontSize; label: string; percent: string; desc: string }[] = [
@@ -66,24 +79,46 @@ export const Navbar: React.FC<NavbarProps> = ({
   onToggleTheme,
   isSyncing,
   sheetSyncStatus,
+  onOpenSystemLinks,
 }) => {
   const [showFontMenu, setShowFontMenu] = useState(false);
+  const [showLinksMenu, setShowLinksMenu] = useState(false);
+  const [copiedLinkId, setCopiedLinkId] = useState<string | null>(null);
   const fontMenuRef = useRef<HTMLDivElement>(null);
+  const linksMenuRef = useRef<HTMLDivElement>(null);
 
-  // Close font menu when clicking outside
+  // Close popovers when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (fontMenuRef.current && !fontMenuRef.current.contains(event.target as Node)) {
         setShowFontMenu(false);
       }
+      if (linksMenuRef.current && !linksMenuRef.current.contains(event.target as Node)) {
+        setShowLinksMenu(false);
+      }
     };
-    if (showFontMenu) {
+    if (showFontMenu || showLinksMenu) {
       document.addEventListener('mousedown', handleClickOutside);
     }
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [showFontMenu]);
+  }, [showFontMenu, showLinksMenu]);
+
+  const handleQuickCopyLink = async (url: string, key: string) => {
+    const ok = await copyTextSafely(url);
+    if (ok) {
+      setCopiedLinkId(key);
+      setTimeout(() => setCopiedLinkId((prev) => (prev === key ? null : prev)), 2000);
+    }
+  };
+
+  const primaryAppUrl = getPrimarySystemUrl(settings);
+  const activeSheetUrl = buildGoogleSheetUrl(settings.googleSheetId);
+  const activeDriveUrl = normalizeSystemUrl(settings.googleDriveFolderUrl || '');
+  const pinnedLinks = (settings.systemLinks ?? DEFAULT_SYSTEM_LINKS).filter(
+    (l) => l.isPinned && normalizeSystemUrl(l.url)
+  );
 
   const currentIndex = FONT_OPTIONS.findIndex((f) => f.id === fontSize);
   const currentOption = FONT_OPTIONS[currentIndex >= 0 ? currentIndex : 1];
@@ -244,6 +279,197 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </>
               )}
             </button>
+
+            {/* Quick System Links & Share Popover */}
+            <div className="relative" ref={linksMenuRef}>
+              <button
+                type="button"
+                onClick={() => setShowLinksMenu(!showLinksMenu)}
+                className="p-2 rounded-lg border bg-slate-800/90 text-emerald-400 border-slate-700/80 hover:bg-slate-700/80 transition-all cursor-pointer flex items-center gap-1.5 text-xs font-medium shadow-sm"
+                title="ลิงก์ระบบและทางลัดที่ใช้งานจริง (System Links)"
+                aria-label="System Quick Links"
+              >
+                <Link2 className="w-4 h-4 shrink-0" />
+                <span className="hidden xl:inline text-[11px] font-semibold">ลิงก์ระบบ</span>
+              </button>
+
+              {showLinksMenu && (
+                <div className="absolute right-0 mt-2 w-80 max-w-[calc(100vw-1.5rem)] bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-3 z-50 space-y-2.5 animate-in fade-in slide-in-from-top-2 duration-150">
+                  <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                    <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <Link2 className="w-3.5 h-3.5 text-emerald-400" />
+                      ลิงก์ระบบที่ใช้งานจริง
+                    </span>
+                    {onOpenSystemLinks && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowLinksMenu(false);
+                          onOpenSystemLinks();
+                        }}
+                        className="text-[11px] text-emerald-400 hover:underline font-semibold cursor-pointer"
+                      >
+                        แก้ไข / จัดการลิงก์
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Primary App URL */}
+                  {primaryAppUrl && (
+                    <div className="p-2.5 rounded-lg bg-slate-950/70 border border-slate-800 space-y-1.5">
+                      <div className="text-[11px] font-semibold text-emerald-400">
+                        ลิงก์เข้าแอปหลัก (แชร์ให้ทีม)
+                      </div>
+                      <div className="text-[11px] font-mono text-slate-300 truncate" title={primaryAppUrl}>
+                        {primaryAppUrl}
+                      </div>
+                      <div className="flex items-center gap-1.5 pt-0.5">
+                        <button
+                          type="button"
+                          onClick={() => handleQuickCopyLink(primaryAppUrl, 'nav-app')}
+                          className="flex-1 py-1 px-2 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-[11px] flex items-center justify-center gap-1 cursor-pointer"
+                        >
+                          {copiedLinkId === 'nav-app' ? (
+                            <>
+                              <Check className="w-3 h-3 text-emerald-400" />
+                              <span>คัดลอกแล้ว</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3 h-3" />
+                              <span>คัดลอกลิงก์</span>
+                            </>
+                          )}
+                        </button>
+                        <a
+                          href={primaryAppUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="py-1 px-2.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-semibold flex items-center gap-1"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          <span>เปิด</span>
+                        </a>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Connected Cloud Links */}
+                  {(activeSheetUrl || activeDriveUrl) && (
+                    <div className="space-y-1.5">
+                      {activeSheetUrl && (
+                        <div className="flex items-center justify-between gap-2 p-2 rounded-lg bg-slate-950/60 border border-slate-800">
+                          <a
+                            href={activeSheetUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1.5 text-xs text-slate-200 hover:text-emerald-400 min-w-0 truncate"
+                          >
+                            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                            <span className="truncate">Google Sheets บัญชีที่ดิน</span>
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => handleQuickCopyLink(activeSheetUrl, 'nav-sheet')}
+                            className="p-1 text-slate-400 hover:text-white cursor-pointer shrink-0"
+                            title="คัดลอกลิงก์ Google Sheet"
+                          >
+                            {copiedLinkId === 'nav-sheet' ? (
+                              <Check className="w-3.5 h-3.5 text-emerald-400" />
+                            ) : (
+                              <Copy className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                        </div>
+                      )}
+
+                      {activeDriveUrl && (
+                        <div className="flex items-center justify-between gap-2 p-2 rounded-lg bg-slate-950/60 border border-slate-800">
+                          <a
+                            href={activeDriveUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1.5 text-xs text-slate-200 hover:text-blue-400 min-w-0 truncate"
+                          >
+                            <FolderSync className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                            <span className="truncate">Google Drive เอกสารโฉนด</span>
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => handleQuickCopyLink(activeDriveUrl, 'nav-drive')}
+                            className="p-1 text-slate-400 hover:text-white cursor-pointer shrink-0"
+                            title="คัดลอกลิงก์ Drive"
+                          >
+                            {copiedLinkId === 'nav-drive' ? (
+                              <Check className="w-3.5 h-3.5 text-emerald-400" />
+                            ) : (
+                              <Copy className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Pinned Custom Links */}
+                  {pinnedLinks.length > 0 && (
+                    <div className="space-y-1 pt-1 border-t border-slate-800">
+                      <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider px-0.5">
+                        ลิงก์ปักหมุด ({pinnedLinks.length})
+                      </div>
+                      <div className="max-h-40 overflow-y-auto space-y-1 pr-0.5">
+                        {pinnedLinks.map((item) => {
+                          const href = normalizeSystemUrl(item.url);
+                          if (!href) return null;
+                          return (
+                            <div
+                              key={item.id}
+                              className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-800/80 transition-colors"
+                            >
+                              <a
+                                href={href}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-1.5 text-xs text-slate-200 hover:text-emerald-400 min-w-0 truncate"
+                              >
+                                <ExternalLink className="w-3 h-3 text-sky-400 shrink-0" />
+                                <span className="truncate">{item.label}</span>
+                              </a>
+                              <button
+                                type="button"
+                                onClick={() => handleQuickCopyLink(href, `nav-${item.id}`)}
+                                className="p-1 text-slate-400 hover:text-white cursor-pointer shrink-0"
+                                title="คัดลอกลิงก์"
+                              >
+                                {copiedLinkId === `nav-${item.id}` ? (
+                                  <Check className="w-3 h-3 text-emerald-400" />
+                                ) : (
+                                  <Copy className="w-3 h-3" />
+                                )}
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {onOpenSystemLinks && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowLinksMenu(false);
+                        onOpenSystemLinks();
+                      }}
+                      className="w-full py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                    >
+                      <Settings className="w-3.5 h-3.5" />
+                      <span>อัปเดต & จัดการลิงก์ระบบทั้งหมด</span>
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
 
             {/* Add Plot Button */}
             <button

@@ -157,6 +157,18 @@ export interface AuthorizedUser {
 
 export type AccessControlPolicy = 'whitelist_only' | 'open_team';
 
+export type SystemLinkCategory = 'app_access' | 'cloud_sync' | 'land_agency' | 'team_resource' | 'other';
+
+export interface SystemLinkItem {
+  id: string;
+  label: string;
+  url: string;
+  category: SystemLinkCategory;
+  description?: string;
+  isPinned?: boolean;
+  updatedAt: string;
+}
+
 export interface PortfolioSettings {
   ownerName: string;
   portfolioTitle: string;
@@ -164,6 +176,11 @@ export interface PortfolioSettings {
   defaultTaxRate: number; // e.g. 2%
   expectedHoldingPeriodMonths?: number; // e.g. 12 or 24 months
   googleSheetId?: string;
+  googleDriveFolderUrl?: string;
+  sharedAppUrl?: string;
+  devAppUrl?: string;
+  customAppUrl?: string;
+  systemLinks?: SystemLinkItem[];
   lastSyncedAt?: string;
   currency: string;
   fontSize?: AppFontSize;

@@ -1,5 +1,38 @@
 import { LandPlot, PortfolioSettings } from '../types/land';
 
+export const DEFAULT_SHARED_APP_URL = 'https://ais-pre-mltplx4jn3nfniprdl5mwk-664312169583.asia-northeast1.run.app';
+export const DEFAULT_DEV_APP_URL = 'https://ais-dev-mltplx4jn3nfniprdl5mwk-664312169583.asia-northeast1.run.app';
+
+export const DEFAULT_SYSTEM_LINKS = [
+  {
+    id: 'sys-link-landsmaps',
+    label: 'ระบบค้นหารูปแปลงที่ดิน (LandsMaps กรมที่ดิน)',
+    url: 'https://landsmaps.dol.go.th/',
+    category: 'land_agency' as const,
+    description: 'ตรวจสอบตำแหน่งระวาง โฉนด และขอบเขตที่ดินจากกรมที่ดิน',
+    isPinned: true,
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  },
+  {
+    id: 'sys-link-treasury',
+    label: 'ตรวจสอบราคาประเมินที่ดิน (กรมธนารักษ์)',
+    url: 'https://assessprice.treasury.go.th/',
+    category: 'land_agency' as const,
+    description: 'ค้นหาราคาประเมินทุนทรัพย์ที่ดินรายโฉนดเพื่อคำนวณภาษี',
+    isPinned: true,
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  },
+  {
+    id: 'sys-link-gmaps',
+    label: 'Google Maps ปักหมุดและนำทางพิกัดแปลง',
+    url: 'https://maps.google.com/',
+    category: 'other' as const,
+    description: 'ค้นหาพิกัด Latitude / Longitude สำหรับบันทึกในพอร์ตที่ดิน',
+    isPinned: false,
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  },
+];
+
 export const DEFAULT_SETTINGS: PortfolioSettings = {
   ownerName: 'อภิวัชร์',
   portfolioTitle: 'รายละเอียดการซื้อที่ดิน - อภิวัชร์',
@@ -9,6 +42,11 @@ export const DEFAULT_SETTINGS: PortfolioSettings = {
   currency: 'บาท',
   fontSize: 'base',
   theme: 'dark',
+  sharedAppUrl: DEFAULT_SHARED_APP_URL,
+  devAppUrl: DEFAULT_DEV_APP_URL,
+  customAppUrl: '',
+  googleDriveFolderUrl: '',
+  systemLinks: DEFAULT_SYSTEM_LINKS,
   accessPolicy: 'open_team',
   adminEmails: ['aspowernetwork@gmail.com'],
   authorizedUsers: [

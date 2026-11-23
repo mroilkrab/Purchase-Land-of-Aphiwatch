@@ -56,6 +56,8 @@ export default function App() {
   const [tableStatusFilter, setTableStatusFilter] = useState<string>('all');
   const [authErrorInfo, setAuthErrorInfo] = useState<GoogleAuthErrorInfo | null>(null);
   const [isAuthTroubleshootOpen, setIsAuthTroubleshootOpen] = useState(false);
+  const [settingsInitialTab, setSettingsInitialTab] = useState<'storage' | 'links' | 'csv' | 'general' | 'hybrid' | 'permissions'>('storage');
+  const [settingsTabNonce, setSettingsTabNonce] = useState(0);
 
   // Auth state
   const [user, setUser] = useState<User | null>(null);
@@ -459,6 +461,12 @@ export default function App() {
   const handleUpdateSettings = (newSettings: PortfolioSettings) => {
     setSettings(newSettings);
     saveSettingsToStorage(newSettings);
+    setSheetSyncStatus((prev) => ({
+      ...prev,
+      sheetUrl: newSettings.googleSheetId
+        ? `https://docs.google.com/spreadsheets/d/${newSettings.googleSheetId}`
+        : undefined,
+    }));
     showToast('บันทึกการตั้งค่าระบบเรียบร้อย');
     syncPlotsToGoogleSheet(plots, 'อัปเดตการตั้งค่าระบบ');
   };
@@ -471,7 +479,13 @@ export default function App() {
       {/* Navigation Bar */}
       <Navbar
         activeTab={activeTab}
-        setActiveTab={setActiveTab}
+        setActiveTab={(tab) => {
+          if (tab === 'settings') {
+            setSettingsInitialTab('storage');
+            setSettingsTabNonce((n) => n + 1);
+          }
+          setActiveTab(tab);
+        }}
         user={user}
         onLogin={handleLogin}
         onLogout={handleLogout}
@@ -490,6 +504,11 @@ export default function App() {
         onToggleTheme={handleToggleTheme}
         isSyncing={isSyncingSheet}
         sheetSyncStatus={sheetSyncStatus}
+        onOpenSystemLinks={() => {
+          setSettingsInitialTab('links');
+          setSettingsTabNonce((n) => n + 1);
+          setActiveTab('settings');
+        }}
       />
 
       {/* Main Content Area */}
@@ -601,6 +620,8 @@ export default function App() {
             onLoginGoogle={handleLogin}
             onNavigateToTable={() => setActiveTab('table')}
             onOpenGoogleAuthTroubleshoot={() => setIsAuthTroubleshootOpen(true)}
+            initialTab={settingsInitialTab}
+            initialTabNonce={settingsTabNonce}
           />
         )}
       </main>
